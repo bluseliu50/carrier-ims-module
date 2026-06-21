@@ -159,6 +159,35 @@ class SupportRulesTest {
     }
 
     @Test
+    fun dodopayPayOrderIdCanBeExtractedForPublicCancel() {
+        assertEquals(
+            "cm_order123",
+            SupportRules.extractDodopayPayOrderId("https://pay.dodododo.org/pay/cm_order123")
+        )
+        assertEquals(
+            "cm-order_123",
+            SupportRules.extractDodopayPayOrderId("https://pay.dodododo.org/pay/cm-order_123?from=app")
+        )
+        assertNull(SupportRules.extractDodopayPayOrderId("https://pay.dodododo.org/checkout/close?order_id=cm_order123"))
+        assertNull(SupportRules.extractDodopayPayOrderId("https://github.com/pay/cm_order123"))
+        assertNull(SupportRules.extractDodopayPayOrderId("http://pay.dodododo.org/pay/cm_order123"))
+        assertNull(SupportRules.extractDodopayPayOrderId("https://pay.dodododo.org/pay/bad%2Fid"))
+    }
+
+    @Test
+    fun dodopayPublicSupportCancelUrlUsesSupportOrigin() {
+        assertEquals(
+            "https://pay.dodododo.org/api/public/support-orders/cm_order123/cancel",
+            SupportRules.buildDodopayPublicSupportCancelUrl(
+                supportUrlTemplate = "https://pay.dodododo.org/support/app_test?foo=bar",
+                orderId = "cm_order123",
+            )
+        )
+        assertNull(SupportRules.buildDodopayPublicSupportCancelUrl("", "cm_order123"))
+        assertNull(SupportRules.buildDodopayPublicSupportCancelUrl("https://pay.dodododo.org/support/app_test", "bad/id"))
+    }
+
+    @Test
     fun validPaymentProofUnlocksAdsOnlyForSameClientAndEnoughAmount() {
         val proof = PaymentProofVerification(
             valid = true,

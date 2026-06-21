@@ -19,6 +19,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.telephony.SubscriptionManager
+import android.util.Log
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -1410,6 +1411,14 @@ class MainActivity : BaseActivity() {
                 supportPaymentUrl?.let { url ->
                     SupportPaymentDialog(
                         url = url,
+                        onCancelPendingOrder = { orderId ->
+                            scope.launch {
+                                val result = viewModel.cancelDodopaySupportOrder(orderId)
+                                result.exceptionOrNull()?.let { error ->
+                                    Log.w("MainActivity", "cancel DoDoPay support order failed: $orderId, msg=${error.message}")
+                                }
+                            }
+                        },
                         onDismiss = { paymentProof ->
                             supportPaymentUrl = null
                             if (paymentProof != null) {
@@ -2347,7 +2356,7 @@ private fun SupportPage(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
+                OutlinedButton(
                     onClick = { onCreateSupportOrder(name, message, amount, SupportPaymentChannel.ALIPAY) },
                     enabled = supportEnabled,
                     modifier = Modifier
@@ -2854,11 +2863,25 @@ private fun CommercialAdDialog(
 @Composable
 private fun SupportPaymentDialog(
     url: String,
+    onCancelPendingOrder: (String) -> Unit,
     onDismiss: (String?) -> Unit,
 ) {
     val dialogHeight = (LocalConfiguration.current.screenHeightDp.dp * 0.88f).coerceAtMost(720.dp)
+    var currentOrderId by remember(url) { mutableStateOf<String?>(null) }
+    var dismissed by remember(url) { mutableStateOf(false) }
+    fun dismissFromDodopay(paymentProof: String?) {
+        if (dismissed) return
+        dismissed = true
+        onDismiss(paymentProof)
+    }
+    fun dismissByUser() {
+        if (dismissed) return
+        dismissed = true
+        currentOrderId?.let(onCancelPendingOrder)
+        onDismiss(null)
+    }
     Dialog(
-        onDismissRequest = { onDismiss(null) },
+        onDismissRequest = { dismissByUser() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Card(
@@ -2886,7 +2909,7 @@ private fun SupportPaymentDialog(
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    DialogCloseButton(onClick = { onDismiss(null) })
+                    DialogCloseButton(onClick = { dismissByUser() })
                 }
                 AndroidView(
                     modifier = Modifier
@@ -2896,13 +2919,28 @@ private fun SupportPaymentDialog(
                     factory = { context ->
                         WebView(context).apply {
                             webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(
+                                    view: WebView?,
+                                    url: String?,
+                                    favicon: Bitmap?,
+                                ) {
+                                    url?.let { nextUrl ->
+                                        SupportRules.extractDodopayPayOrderId(nextUrl)?.let { orderId ->
+                                            currentOrderId = orderId
+                                        }
+                                    }
+                                }
+
                                 override fun shouldOverrideUrlLoading(
                                     view: WebView?,
                                     request: WebResourceRequest?,
                                 ): Boolean {
                                     val nextUrl = request?.url?.toString().orEmpty()
+                                    SupportRules.extractDodopayPayOrderId(nextUrl)?.let { orderId ->
+                                        currentOrderId = orderId
+                                    }
                                     if (SupportRules.isDodopayCheckoutCloseUrl(nextUrl)) {
-                                        onDismiss(SupportRules.extractDodopayPaymentProof(nextUrl))
+                                        dismissFromDodopay(SupportRules.extractDodopayPaymentProof(nextUrl))
                                         return true
                                     }
                                     return false

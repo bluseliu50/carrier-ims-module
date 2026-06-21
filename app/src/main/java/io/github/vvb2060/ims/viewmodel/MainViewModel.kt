@@ -753,6 +753,17 @@ class MainViewModel(private val application: Application) : AndroidViewModel(app
         return "$origin/api/public/payment-proofs/$paymentProof"
     }
 
+    suspend fun cancelDodopaySupportOrder(orderId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val cancelUrl = SupportRules.buildDodopayPublicSupportCancelUrl(
+                supportUrlTemplate = dodopaySupportUrlTemplate.orEmpty(),
+                orderId = orderId,
+            ) ?: throw IllegalArgumentException("invalid DoDoPay order id")
+            postJsonObject(cancelUrl, JSONObject())
+            Unit
+        }
+    }
+
     suspend fun submitBusinessIntent(
         intentType: BusinessIntentType,
         name: String,

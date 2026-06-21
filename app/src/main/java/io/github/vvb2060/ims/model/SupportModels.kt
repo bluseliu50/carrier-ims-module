@@ -108,6 +108,7 @@ data class ApnDraftConfig(
 object SupportRules {
     const val AD_FREE_PROOF_KEY = "support_unlock"
     private val paymentProofPattern = Regex("""proof_[0-9a-f]{64}""")
+    private val dodopayOrderIdPattern = Regex("""[A-Za-z0-9_-]{4,128}""")
     private val supportAmountPattern = Regex("""(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?""")
     private val adFreeAmount = BigDecimal("100.00")
 
@@ -178,6 +179,22 @@ object SupportRules {
             ?: findParamValue(uri.query, "payment_proof")
             ?: return null
         return proof.takeIf { paymentProofPattern.matches(it) }
+    }
+
+    fun extractDodopayPayOrderId(value: String): String? {
+        val uri = runCatching { URI(value.trim()) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase(Locale.US).orEmpty()
+        val host = uri.host?.lowercase(Locale.US).orEmpty()
+        if (scheme != "https" || host != "pay.dodododo.org") return null
+        val segments = uri.path.orEmpty().trim('/').split('/').filter { it.isNotBlank() }
+        if (segments.size != 2 || segments[0] != "pay") return null
+        return segments[1].takeIf { dodopayOrderIdPattern.matches(it) }
+    }
+
+    fun buildDodopayPublicSupportCancelUrl(supportUrlTemplate: String, orderId: String): String? {
+        if (!dodopayOrderIdPattern.matches(orderId)) return null
+        val origin = resolveUrlOrigin(supportUrlTemplate) ?: return null
+        return "$origin/api/public/support-orders/$orderId/cancel"
     }
 
     fun resolveUrlOrigin(value: String): String? {
