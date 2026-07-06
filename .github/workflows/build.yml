@@ -31,12 +31,17 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      # ubuntu-latest ships the Android SDK + sdkmanager preinstalled at
+      # $ANDROID_HOME. Install the exact platform/build-tools AGP needs.
+      # (We call sdkmanager directly because the setup-android action mangles
+      # multi-line `packages:` into one malformed package string.)
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platforms;android-36
-            build-tools;36.0.0
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "platform-tools"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
