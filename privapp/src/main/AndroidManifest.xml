@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Privileged permissions (granted via privapp-permissions-carrier_ims.xml
+         because this app lives in /system/priv-app/). -->
+    <uses-permission android:name="android.permission.MODIFY_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
+    <application
+        android:label="CarrierImsApplier"
+        android:privileged="true">
+
+        <service
+            android:name=".ApplierService"
+            android:foregroundServiceType="phoneCall"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.SIM_STATE_CHANGED" />
+                <action android:name="android.telephony.action.MULTI_SIM_CONFIG_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".ApplyConfigReceiver"
+            android:exported="true"
+            android:permission="android.permission.SHELL">
+            <intent-filter>
+                <action android:name="io.carrierims.action.APPLY_CONFIG" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
