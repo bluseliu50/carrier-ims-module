@@ -56,11 +56,28 @@ public class Applier {
             return;
         }
 
-        // ---- CRITICAL: Drop to shell uid (2000) IMMEDIATELY ----
-        // Root (uid 0) app_process gets SIGKILL by Android process management.
-        // Shell uid (2000) survives and has MODIFY_PHONE_STATE.
-        Os.setgid(2000);
-        Os.setuid(2000);
+        // ---- Run as ROOT (uid 0) with shell permission delegation ----
+        // The overrideConfig API rejects uid == SHELL_UID(2000) with
+        // "overrideConfig cannot be invoked by shell". Root (uid 0) passes
+        // that check AND holds MODIFY_PHONE_STATE.
+        //
+        // The previous SIGKILL was from ActivityThread.systemMain() (AMS
+        // registration), NOT from being root. We use ServiceManager directly
+        // — no AMS interaction, no ActivityThread.
+        //
+        // Mirror the original Shizuku app: delegate shell permissions so all
+        // platform-level permission checks pass. startDelegateShellPermissionIdentity
+        // requires calling uid == ROOT or SHELL; root qualifies.
+        Object am = getService("activity", "IActivityManager");
+        if (am != null) {
+            try {
+                am.getClass()
+                    .getMethod("startDelegateShellPermissionIdentity", int.class, String[].class)
+                    .invoke(am, Os.getuid(), null);
+            } catch (Exception e) {
+                // Delegation is best-effort; root already has all permissions.
+            }
+        }
 
         // ---- Get services via ServiceManager (no Context needed) ----
         Object ccLoader = getService("carrier_config", "ICarrierConfigLoader");
@@ -74,7 +91,6 @@ public class Applier {
             System.out.println("{\"ok\":false,\"error\":\"isub service unavailable\"}");
             return;
         }
-
         // ---- Get subIds WITHOUT READ_PHONE_STATE ----
         // getActiveSubscriptionInfoList requires READ_PHONE_STATE (shell uid lacks it).
         // ISub.getSubId(slotIndex) and getDefaultSubId() do NOT require permission.
@@ -132,6 +148,13 @@ public class Applier {
             r.put("applied", applied);
             if (error != null) r.put("error", error);
             results.put(r);
+        }
+
+        // Stop the shell permission delegation (clean up, matching original app).
+        if (am != null) {
+            try {
+                am.getClass().getMethod("stopDelegateShellPermissionIdentity").invoke(am);
+            } catch (Exception ignored) { }
         }
 
         JSONObject status = new JSONObject();

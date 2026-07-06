@@ -59,6 +59,18 @@ if echo "$OUTPUT" | grep -q '"ok":false'; then
     exit 1
 fi
 
-# Success — write status.json from the output (last line with JSON)
+# Write status.json from the output (last JSON line)
 echo "$OUTPUT" | tail -1 > /data/adb/carrier_ims/status.json
-emit '{"ok":true}'
+
+# Check if any slot actually applied (status has "applied":true)
+if echo "$OUTPUT" | grep -q '"applied":true'; then
+    emit '{"ok":true}'
+else
+    # All slots failed — surface the first error
+    ERR=$(echo "$OUTPUT" | grep -o '"error":"[^"]*"' | head -1 | sed 's/"error":"//;s/"$//')
+    if [ -n "$ERR" ]; then
+        emit "{\"ok\":false,\"error\":\"$ERR\"}"
+    else
+        emit '{"ok":false,"error":"所有卡槽应用失败"}'
+    fi
+fi
