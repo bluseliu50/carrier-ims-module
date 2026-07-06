@@ -1,30 +1,32 @@
-import android.content.Context;
-import android.os.Bundle;
+import android.os.IBinder;
 import android.os.PersistableBundle;
+import android.system.Os;
 import android.telephony.CarrierConfigManager;
 import android.telephony.SubscriptionInfo;
-import android.telephony.SubscriptionManager;
-import android.telephony.TelephonyManager;
 import org.json.JSONArray;
 import org.json.JSONObject;
-import java.lang.reflect.Method;
-import java.util.List;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileWriter;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.List;
 
 /**
  * Root-mode CarrierConfig applier. Runs via
  *   CLASSPATH=Applier.dex app_process / Applier <action>
- * as uid 0 (root). Root holds MODIFY_PHONE_STATE implicitly, so
- * CarrierConfigManager.overrideConfig succeeds without FLAG_SYSTEM,
- * a priv-app, or any /system overlay — zero boot-loop risk.
  *
- * Logic ported from the original ImsModifier.buildBundle (Shizuku app).
+ * CRITICAL: app_process starts as root (uid 0). Android's process management
+ * SIGKILLs uid-0 app_process within ~1s. We IMMEDIATELY drop to shell uid
+ * (2000) via Os.setuid — shell uid is not killed, and it has
+ * MODIFY_PHONE_STATE + READ_PHONE_STATE assigned in platform.xml.
+ *
+ * Uses ServiceManager directly (no Context / ActivityThread / AMS interaction)
+ * to get the carrier_config and isub binder services.
+ *
+ * Logic ported from ImsModifier.buildBundle (original Shizuku app).
  */
 public class Applier {
     static final String CONFIG_PATH = "/data/adb/carrier_ims/config.json";
-    static final String STATUS_PATH = "/data/adb/carrier_ims/status.json";
 
     static final String K_NR_THR_BW = "nr_advanced_threshold_bandwidth_khz_int";
     static final String K_NR_ADV_BANDS = "additional_nr_advanced_bands_int_array";
@@ -41,34 +43,46 @@ public class Applier {
     public static void main(String[] args) throws Throwable {
         String action = (args.length > 0) ? args[0] : "apply";
 
-        // app_process launched from shell has no Application. Use systemMain()
-        // to create a system-level ActivityThread and get a usable Context.
-        Class<?> at = Class.forName("android.app.ActivityThread");
-        Object thread = at.getMethod("systemMain").invoke(null);
-        Context ctx = (Context) at.getMethod("getSystemContext").invoke(thread);
-        if (ctx == null) { writeError("cannot get system context"); return; }
-        CarrierConfigManager cm = (CarrierConfigManager) ctx.getSystemService(Context.CARRIER_CONFIG_SERVICE);
-        SubscriptionManager sm = (SubscriptionManager) ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
-        TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
-
-        if (cm == null || sm == null) { writeError("system service unavailable"); return; }
-
-        @SuppressWarnings("unchecked")
-        List<SubscriptionInfo> subs = (List<SubscriptionInfo>)
-            SubscriptionManager.class.getMethod("getActiveSubscriptionInfoList").invoke(sm);
-        if (subs == null || subs.isEmpty()) { writeError("no active subscriptions"); return; }
-
-        if ("reset".equals(action)) {
-            for (SubscriptionInfo sub : subs) invoke(cm, sub.getSubscriptionId(), null, false);
-            writeReset(); return;
-        }
-
+        // ---- Read config AS ROOT (before dropping privileges) ----
         File cfgFile = new File(CONFIG_PATH);
-        if (!cfgFile.exists()) { writeError("no config"); return; }
+        if (!cfgFile.exists()) {
+            System.out.println("{\"ok\":false,\"error\":\"no config file\"}");
+            return;
+        }
         JSONObject cfg = new JSONObject(readFile(cfgFile));
         JSONObject slots = cfg.optJSONObject("slots");
-        if (slots == null) { writeError("no slots configured"); return; }
+        if (slots == null || slots.isEmpty()) {
+            System.out.println("{\"ok\":false,\"error\":\"no slots configured\"}");
+            return;
+        }
 
+        // ---- CRITICAL: Drop to shell uid (2000) IMMEDIATELY ----
+        // Root (uid 0) app_process gets SIGKILL by Android process management.
+        // Shell uid (2000) survives and has MODIFY_PHONE_STATE.
+        Os.setgid(2000);
+        Os.setuid(2000);
+
+        // ---- Get services via ServiceManager (no Context needed) ----
+        Object ccLoader = getService("carrier_config", "ICarrierConfigLoader");
+        Object isub = getService("isub", "ISub");
+
+        if (ccLoader == null) {
+            System.out.println("{\"ok\":false,\"error\":\"carrier_config service unavailable\"}");
+            return;
+        }
+        if (isub == null) {
+            System.out.println("{\"ok\":false,\"error\":\"isub service unavailable\"}");
+            return;
+        }
+
+        // ---- Get active subscriptions ----
+        List<SubscriptionInfo> subs = getSubscriptions(isub);
+        if (subs == null || subs.isEmpty()) {
+            System.out.println("{\"ok\":false,\"error\":\"no active subscriptions\"}");
+            return;
+        }
+
+        // ---- Apply for each subscription ----
         JSONArray results = new JSONArray();
         for (SubscriptionInfo sub : subs) {
             int slot = sub.getSimSlotIndex();
@@ -76,28 +90,108 @@ public class Applier {
             JSONObject sc = slots.optJSONObject(String.valueOf(slot));
             if (sc == null) continue;
 
-            Bundle b = buildBundle(sc);
-            boolean applied = false; String error = null;
-            try { invoke(cm, subId, toPB(b), true); applied = true; }
-            catch (Throwable pe) {
-                try { invoke(cm, subId, toPB(b), false); applied = true; }
-                catch (Throwable fe) { error = fe.getMessage() != null ? fe.getMessage() : fe.getClass().getSimpleName(); }
+            PersistableBundle bundle = buildBundle(sc);
+            boolean applied = false;
+            String error = null;
+
+            // Try persistent first; fall back to non-persistent (same as Shizuku app).
+            try {
+                overrideConfig(ccLoader, subId, bundle, true);
+                applied = true;
+            } catch (Throwable pe) {
+                try {
+                    overrideConfig(ccLoader, subId, bundle, false);
+                    applied = true;
+                } catch (Throwable fe) {
+                    error = fe.getMessage() != null ? fe.getMessage() : fe.getClass().getSimpleName();
+                }
             }
-            boolean ims = imsRegistered(tm, subId);
+
             JSONObject r = new JSONObject();
-            r.put("slotIndex", slot); r.put("subId", subId);
-            r.put("applied", applied); r.put("imsRegistered", ims);
+            r.put("slotIndex", slot);
+            r.put("subId", subId);
+            r.put("applied", applied);
             if (error != null) r.put("error", error);
             results.put(r);
         }
+
         JSONObject status = new JSONObject();
         status.put("lastApplyMillis", System.currentTimeMillis());
         status.put("slots", results);
-        writeFile(STATUS_PATH, status.toString());
+        System.out.println(status.toString());
     }
 
-    static Bundle buildBundle(JSONObject s) throws Exception {
-        Bundle b = new Bundle();
+    // ---- Service helpers ----
+
+    static Object getService(String serviceName, String aidlName) {
+        try {
+            Class<?> smClass = Class.forName("android.os.ServiceManager");
+            IBinder binder = (IBinder) smClass
+                .getMethod("getService", String.class)
+                .invoke(null, serviceName);
+            if (binder == null) return null;
+
+            // Try known package prefixes for the Stub class
+            String[] prefixes = {
+                "android.telephony.",
+                "com.android.internal.telephony.",
+                "com.android.internal.telephony.ims.",
+            };
+            for (String prefix : prefixes) {
+                try {
+                    Class<?> stubClass = Class.forName(prefix + aidlName + "$Stub");
+                    return stubClass
+                        .getMethod("asInterface", IBinder.class)
+                        .invoke(null, binder);
+                } catch (ClassNotFoundException ignored) { }
+            }
+        } catch (Exception e) {
+            System.out.println("{\"ok\":false,\"error\":\"getService " + serviceName + ": " + e.getClass().getSimpleName() + "\"}");
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    static List<SubscriptionInfo> getSubscriptions(Object isub) {
+        try {
+            try {
+                // Android 12+: 2-arg version (callingPackage, featureId)
+                Method m = isub.getClass()
+                    .getMethod("getActiveSubscriptionInfoList", String.class, String.class);
+                return (List<SubscriptionInfo>) m.invoke(isub, "com.android.shell", null);
+            } catch (NoSuchMethodException e) {
+                // Older: 1-arg version
+                Method m = isub.getClass()
+                    .getMethod("getActiveSubscriptionInfoList", String.class);
+                return (List<SubscriptionInfo>) m.invoke(isub, "com.android.shell");
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static void overrideConfig(Object loader, int subId, PersistableBundle bundle, boolean persistent) throws Throwable {
+        try {
+            Method m = loader.getClass()
+                .getMethod("overrideConfig", int.class, PersistableBundle.class, boolean.class);
+            m.invoke(loader, subId, bundle, persistent);
+        } catch (InvocationTargetException e) {
+            throw e.getCause();
+        } catch (NoSuchMethodException e) {
+            try {
+                Method m = loader.getClass()
+                    .getMethod("overrideConfig", int.class, PersistableBundle.class);
+                m.invoke(loader, subId, bundle);
+            } catch (InvocationTargetException e2) {
+                throw e2.getCause();
+            }
+        }
+    }
+
+    // ---- Bundle building (ported from ImsModifier.buildBundle) ----
+
+    static PersistableBundle buildBundle(JSONObject s) throws Exception {
+        PersistableBundle b = new PersistableBundle();
         if (s.optBoolean("tiktokNetworkFix", false)) {
             b.putString(CarrierConfigManager.KEY_SIM_COUNTRY_ISO_OVERRIDE_STRING, "cn");
             b.putString(K_MCC_OVERRIDE, MCC_CN);
@@ -145,60 +239,11 @@ public class Applier {
         return b;
     }
 
-    static PersistableBundle toPB(Bundle b) {
-        PersistableBundle pb = new PersistableBundle();
-        for (String k : b.keySet()) {
-            Object v = b.get(k);
-            if (v instanceof Boolean) pb.putBoolean(k, (Boolean)v);
-            else if (v instanceof Integer) pb.putInt(k, (Integer)v);
-            else if (v instanceof String) pb.putString(k, (String)v);
-            else if (v instanceof int[]) pb.putIntArray(k, (int[])v);
-        }
-        return pb;
-    }
-
-    static void invoke(CarrierConfigManager cm, int subId, PersistableBundle v, boolean persistent) throws Throwable {
-        try {
-            cm.getClass().getMethod("overrideConfig", int.class, PersistableBundle.class, boolean.class)
-                .invoke(cm, subId, v, persistent);
-        } catch (NoSuchMethodException e) {
-            cm.getClass().getMethod("overrideConfig", int.class, PersistableBundle.class)
-                .invoke(cm, subId, v);
-        }
-    }
-
-    static boolean imsRegistered(TelephonyManager tm, int subId) {
-        try {
-            TelephonyManager per = (TelephonyManager)
-                TelephonyManager.class.getMethod("createForSubscriptionId", int.class).invoke(tm, subId);
-            Object r = TelephonyManager.class.getMethod("isImsRegistered", int.class).invoke(per, subId);
-            return r != null && (Boolean) r;
-        } catch (Throwable t) { return false; }
-    }
-
     static String readFile(File f) throws Exception {
         byte[] buf = new byte[(int)f.length()];
         FileInputStream fis = new FileInputStream(f);
-        fis.read(buf); fis.close();
+        fis.read(buf);
+        fis.close();
         return new String(buf, "UTF-8");
-    }
-    static void writeFile(String path, String content) throws Exception {
-        FileWriter w = new FileWriter(path); w.write(content); w.close();
-    }
-    static void writeError(String msg) {
-        try {
-            JSONObject s = new JSONObject();
-            s.put("lastApplyMillis", System.currentTimeMillis());
-            s.put("error", msg); s.put("slots", new JSONArray());
-            writeFile(STATUS_PATH, s.toString());
-        } catch (Exception ignored) {}
-    }
-    static void writeReset() {
-        try {
-            JSONObject s = new JSONObject();
-            s.put("lastApplyMillis", System.currentTimeMillis());
-            s.put("reset", true); s.put("slots", new JSONArray());
-            writeFile(STATUS_PATH, s.toString());
-        } catch (Exception ignored) {}
     }
 }
