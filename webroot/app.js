@@ -150,11 +150,35 @@ function applyConfig() {
   const res = document.getElementById("applyResult");
   res.textContent = "应用中…"; res.className = "apply-result";
   const out = sh(`sh ${MODDIR}/bin/apply.sh ${b64}`);
-  const ok = out && out.includes('"ok":true');
-  res.textContent = ok ? "已应用" : "失败";
-  res.className = "apply-result " + (ok ? "ok" : "err");
-  showToast(ok ? "已应用配置" : "应用失败");
-  if (ok) setTimeout(refreshStatus, 1200);
+  let info = null;
+  try { info = out ? JSON.parse(out.trim()) : null; } catch (_) {}
+  const ok = !!(info && info.ok);
+  // Surface why it may not have taken effect.
+  if (!ok) {
+    res.textContent = "失败：" + ((info && info.error) || "未知错误");
+    res.className = "apply-result err";
+    showToast("应用失败");
+    return;
+  }
+  if (info.app !== "yes") {
+    res.textContent = "已保存配置，但特权应用未安装（未生效）";
+    res.className = "apply-result err";
+    showToast("特权应用未安装");
+    refreshStatus();
+    return;
+  }
+  // Priv-app installed + broadcast fired. Give it a moment to write
+  // status.json, then reflect the real per-slot result.
+  res.textContent = "已下发，正在确认…"; res.className = "apply-result";
+  showToast("已下发配置");
+  // Retry status a few times: the priv-app applies synchronously.
+  let tries = 0;
+  const tick = () => {
+    refreshStatus();
+    tries++;
+    if (tries < 4) setTimeout(tick, 800);
+  };
+  setTimeout(tick, 600);
 }
 
 function refreshStatus() {
@@ -191,11 +215,23 @@ function refreshStatus() {
 function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
 function loadVersion() {
-  const stdout = sh(`cat ${MODDIR}/module.prop`);
-  if (stdout) {
-    const m = stdout.match(/^version=(.+)$/m);
-    if (m) document.getElementById("version").textContent = m[1];
-  }
+  // ksu.exec uses fastCmd which returns only the FIRST line, so grep the
+  // version line explicitly instead of catting the whole file.
+  const stdout = sh(`grep '^version=' ${MODDIR}/module.prop`);
+  const m = stdout && stdout.match(/^version=(.+)$/m);
+  if (m) document.getElementById("version").textContent = m[1];
+}
+
+// Show whether the privileged app is installed (the apply path depends on it).
+function checkPrivApp() {
+  const host = document.getElementById("version");
+  const installed = sh(`pm path io.carrierims.applier`).trim().length > 0;
+  const dot = document.createElement("span");
+  dot.style.cssText =
+    "display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:8px;vertical-align:middle;background:" +
+    (installed ? "var(--md-success)" : "var(--md-error)");
+  dot.title = installed ? "特权应用已安装" : "特权应用未安装（模块未生效）";
+  host.appendChild(dot);
 }
 
 // ---- boot ----
@@ -203,6 +239,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadLocal();
   loadVersion();
   loadConfig();
+  checkPrivApp();
   ensureSlot(activeSlot);
   document.getElementById("applyBtn").addEventListener("click", applyConfig);
   document.getElementById("refreshBtn").addEventListener("click", refreshStatus);

@@ -24,8 +24,7 @@
 
         <receiver
             android:name=".ApplyConfigReceiver"
-            android:exported="true"
-            android:permission="android.permission.SHELL">
+            android:exported="true">
             <intent-filter>
                 <action android:name="io.carrierims.action.APPLY_CONFIG" />
             </intent-filter>
