@@ -33,6 +33,8 @@ javac --release 11 -cp "$PLATFORM_JAR" -d build/classes applier/src/Applier.java
 echo ">> Compiling to dex…"
 mkdir -p system/bin
 "$D8" --min-api 33 --output system/bin build/classes/Applier.class
+# d8 writes classes.dex; rename to Applier.dex for clarity.
+mv -f system/bin/classes.dex system/bin/Applier.dex
 echo "   -> system/bin/Applier.dex"
 
 echo ">> Packing module zip → $OUT"
