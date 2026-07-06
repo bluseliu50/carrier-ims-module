@@ -75,26 +75,45 @@ public class Applier {
             return;
         }
 
-        // ---- Get active subscriptions ----
-        List<SubscriptionInfo> subs = getSubscriptions(isub);
-        if (subs == null || subs.isEmpty()) {
-            System.out.println("{\"ok\":false,\"error\":\"no active subscriptions\"}");
-            return;
-        }
-
-        // ---- Apply for each subscription ----
+        // ---- Get subIds WITHOUT READ_PHONE_STATE ----
+        // getActiveSubscriptionInfoList requires READ_PHONE_STATE (shell uid lacks it).
+        // ISub.getSubId(slotIndex) and getDefaultSubId() do NOT require permission.
         JSONArray results = new JSONArray();
-        for (SubscriptionInfo sub : subs) {
-            int slot = sub.getSimSlotIndex();
-            int subId = sub.getSubscriptionId();
+
+        for (int slot = 0; slot <= 1; slot++) {
             JSONObject sc = slots.optJSONObject(String.valueOf(slot));
             if (sc == null) continue;
+
+            // Get subId for this slot (no permission check needed)
+            int subId = -1;
+            try {
+                subId = (int) isub.getClass()
+                    .getMethod("getSubId", int.class)
+                    .invoke(isub, slot);
+            } catch (Exception e) {
+                // getSubId failed — for slot 0, try getDefaultSubId
+                if (slot == 0) {
+                    try {
+                        subId = (int) isub.getClass()
+                            .getMethod("getDefaultSubId")
+                            .invoke(isub);
+                    } catch (Exception e2) { subId = -1; }
+                }
+            }
+            if (subId < 0) {
+                JSONObject r = new JSONObject();
+                r.put("slotIndex", slot);
+                r.put("applied", false);
+                r.put("error", "no subId for slot " + slot);
+                results.put(r);
+                continue;
+            }
 
             PersistableBundle bundle = buildBundle(sc);
             boolean applied = false;
             String error = null;
 
-            // Try persistent first; fall back to non-persistent (same as Shizuku app).
+            // Try persistent first; fall back to non-persistent.
             try {
                 overrideConfig(ccLoader, subId, bundle, true);
                 applied = true;
@@ -151,24 +170,6 @@ public class Applier {
         return null;
     }
 
-    @SuppressWarnings("unchecked")
-    static List<SubscriptionInfo> getSubscriptions(Object isub) {
-        try {
-            try {
-                // Android 12+: 2-arg version (callingPackage, featureId)
-                Method m = isub.getClass()
-                    .getMethod("getActiveSubscriptionInfoList", String.class, String.class);
-                return (List<SubscriptionInfo>) m.invoke(isub, "com.android.shell", null);
-            } catch (NoSuchMethodException e) {
-                // Older: 1-arg version
-                Method m = isub.getClass()
-                    .getMethod("getActiveSubscriptionInfoList", String.class);
-                return (List<SubscriptionInfo>) m.invoke(isub, "com.android.shell");
-            }
-        } catch (Exception e) {
-            return null;
-        }
-    }
 
     static void overrideConfig(Object loader, int subId, PersistableBundle bundle, boolean persistent) throws Throwable {
         try {
