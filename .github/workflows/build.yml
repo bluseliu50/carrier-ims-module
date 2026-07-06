@@ -36,9 +36,12 @@ jobs:
       # (We call sdkmanager directly because the setup-android action mangles
       # multi-line `packages:` into one malformed package string.)
       - name: Set up Android SDK
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
         run: |
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager --install \
+          SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+          "$SDKMGR" --install \
             "platforms;android-36" \
             "build-tools;36.0.0" \
             "platform-tools"
