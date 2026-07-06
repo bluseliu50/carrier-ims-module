@@ -29,11 +29,23 @@ cp -f "$APK_IN" system/priv-app/CarrierImsApplier/CarrierImsApplier.apk
 
 echo ">> Packing module zip → $OUT"
 rm -f "$OUT"
-# Exclude build artifacts, source-only dirs, and git; keep everything else.
-zip -qr "$OUT" . \
-    -x "privapp/build/*" "privapp/.gradle/*" ".gradle/*" \
-       "webroot-src/*" "*.zip" ".git/*" "build-module.sh" "AGENTS.md"
+
+# Stage only the runtime files into a temp dir so the install zip carries no
+# build-time-only content (gradle, privapp source, README, AGENTS.md, etc.).
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/system/priv-app/CarrierImsApplier" \
+         "$STAGE/system/etc/permissions" \
+         "$STAGE/bin" \
+         "$STAGE/webroot"
+cp -f module.prop customize.sh service.sh uninstall.sh update.json "$STAGE"/
+cp -f bin/*.sh "$STAGE/bin/"
+cp -f webroot/index.html webroot/app.js webroot/style.css "$STAGE/webroot/"
+cp -f system/etc/permissions/privapp-permissions-carrier_ims.xml "$STAGE/system/etc/permissions/"
+cp -f system/priv-app/CarrierImsApplier/CarrierImsApplier.apk "$STAGE/system/priv-app/CarrierImsApplier/"
+
+(cd "$STAGE" && zip -qr "$OLDPWD/$OUT" .)
 
 echo "✓ Built $OUT"
-echo "  Contents check:"
-unzip -l "$OUT" | grep -E "CarrierImsApplier.apk|privapp-permissions|module.prop|webroot/index.html" || true
+echo "  Contents:"
+unzip -l "$OUT"
