@@ -3,13 +3,16 @@ package io.carrierims.applier
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 
 /**
- * Triggers an apply pass on BOOT_COMPLETED and on SIM_STATE_CHANGED (LOADED/READY)
- * when the user has enabled auto re-apply. Starting a foreground service from a
- * BOOT_COMPLETED receiver is permitted on modern Android.
+ * Re-applies config on BOOT_COMPLETED and on SIM_STATE_CHANGED (LOADED/READY),
+ * and on MULTI_SIM_CONFIG_CHANGED. Boot + SIM-change re-apply is always on;
+ * there is no per-user toggle (disabling the module is the root manager's job).
+ *
+ * Applies synchronously in the receiver's foreground execution window — no
+ * foreground service (avoids the startForegroundService-without-startForeground
+ * crash).
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -18,34 +21,26 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
         Log.i(tag, "received $action")
-        val config = ConfigStore.read() ?: return
-        if (!config.enabled) {
-            Log.i(tag, "module disabled; skip")
-            return
-        }
         when (action) {
-            Intent.ACTION_BOOT_COMPLETED -> {
-                if (config.applyOnBoot) startApply(context)
-            }
-            "android.intent.action.SIM_STATE_CHANGED" -> {
-                // SIM ready/loaded → apply on SIM change if configured.
-                val ss = intent.getStringExtra("ss")
-                if (config.applyOnSimChange && (ss == "LOADED" || ss == "READY")) {
-                    startApply(context)
-                }
-            }
-            "android.telephony.action.MULTI_SIM_CONFIG_CHANGED" -> {
-                if (config.applyOnSimChange) startApply(context)
-            }
+            Intent.ACTION_BOOT_COMPLETED,
+            "android.intent.action.SIM_STATE_CHANGED",
+            "android.telephony.action.MULTI_SIM_CONFIG_CHANGED",
+            "android.telephony.action.CARRIER_CONFIG_CHANGED",
+            -> applyNow(context)
         }
     }
 
-    private fun startApply(context: Context) {
-        val svc = Intent(context, ApplierService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(svc)
-        } else {
-            context.startService(svc)
+    private fun applyNow(context: Context) {
+        val config = ConfigStore.read()
+        if (config.slots.isEmpty()) {
+            Log.i(tag, "no slot config; skip")
+            return
+        }
+        try {
+            val outcome = Applier.apply(context.applicationContext, config)
+            Log.i(tag, "apply done: ${outcome.slots.size} slot(s)")
+        } catch (t: Throwable) {
+            Log.e(tag, "apply failed", t)
         }
     }
 }

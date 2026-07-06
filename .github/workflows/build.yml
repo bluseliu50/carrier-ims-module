@@ -83,7 +83,6 @@ jobs:
             bin/apply.sh \
             bin/status.sh \
             bin/read-config.sh \
-            bin/captive-portal.sh \
             system/priv-app/CarrierImsApplier/CarrierImsApplier.apk \
             system/etc/permissions/privapp-permissions-carrier_ims.xml \
             webroot/index.html \

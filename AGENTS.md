@@ -25,6 +25,10 @@ that holds `MODIFY_PHONE_STATE` → `overrideConfig(persistent=true)`.
 - **README_EN.md** is the **English** version. The two link to each other.
 - Keep them in sync when you change one.
 - Do **not** mix English into `README.md` or Chinese into `README_EN.md`.
+- Use **formal written register** in both READMEs — no colloquialisms, slang,
+  or casual phrasing (e.g. avoid "塞一个", "那条路只认", "拔卡换卡"; write
+  "放置一个", "仅允许", "插入或更换 SIM 卡"). Technical terms and code
+  identifiers stay in English.
 
 ## Git conventions
 

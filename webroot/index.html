@@ -3,79 +3,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#6750A4" />
   <title>Carrier IMS</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="title">
-      <h1>Carrier IMS <small id="version"></small></h1>
-      <label class="master">
-        <input type="checkbox" id="masterEnabled" />
-        <span>主开关 / Master enable</span>
-      </label>
+  <header class="topappbar">
+    <div class="appbar-inner">
+      <span class="appbar-title">Carrier IMS</span>
+      <span class="appbar-version" id="version"></span>
     </div>
   </header>
 
-  <main>
-    <!-- Slot selector -->
-    <nav class="tabs">
-      <button class="tab active" data-slot="0">卡槽 0</button>
-      <button class="tab" data-slot="1">卡槽 1</button>
-    </nav>
+  <main class="content">
+    <!-- Slot tabs -->
+    <nav class="segmented" id="slotTabs"></nav>
 
-    <section id="slotForm" class="card">
-      <div class="row">
-        <label>运营商名称 / Carrier name</label>
-        <input type="text" id="carrierName" placeholder="如 中国移动 / China Mobile" />
-      </div>
-      <div class="row">
-        <label>国家码 / Country ISO</label>
-        <input type="text" id="countryIso" placeholder="如 cn" />
-      </div>
-      <div class="row">
-        <label>MCC override (3 位数字, 可选)</label>
-        <input type="text" id="countryMccOverride" placeholder="如 460" />
-      </div>
-
-      <div class="toggles" id="toggles"></div>
+    <!-- Feature list -->
+    <section class="card" id="featureCard">
+      <ul class="setting-list" id="featureList"></ul>
     </section>
 
-    <section class="actions">
-      <button id="applyBtn" class="primary">应用 / Apply</button>
-      <span id="applyResult"></span>
-    </section>
+    <!-- Apply -->
+    <button class="btn-filled" id="applyBtn">应用</button>
+    <p class="apply-result" id="applyResult"></p>
 
     <!-- Status -->
     <section class="card">
       <div class="card-head">
-        <h2>状态 / Status</h2>
-        <button id="refreshBtn" class="ghost">刷新</button>
+        <h2>状态</h2>
+        <button class="btn-text" id="refreshBtn">刷新</button>
       </div>
-      <pre id="statusView" class="status">{}</pre>
-    </section>
-
-    <!-- Captive portal -->
-    <section class="card">
-      <div class="card-head"><h2> captive portal (CN 修复)</h2></div>
-      <p class="muted">仅 Shell 操作，无需特权应用。修复 Google 服务不可用导致的联网检测异常。</p>
-      <div class="row-inline">
-        <button id="cpFix" class="ghost">修复 CN</button>
-        <button id="cpRestore" class="ghost">恢复默认</button>
-        <button id="cpQuery" class="ghost">查询</button>
-      </div>
-      <pre id="cpView" class="status"></pre>
+      <div id="statusView" class="status-list"></div>
     </section>
   </main>
 
-  <footer class="footer">
-    <span id="autoOpts">
-      <label><input type="checkbox" id="applyOnBoot" checked /> 开机自动应用</label>
-      <label><input type="checkbox" id="applyOnSimChange" checked /> 换卡自动应用</label>
-    </span>
-    <p class="muted">更新请使用管理器内置更新 · Updates via your root manager.</p>
-  </footer>
-
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

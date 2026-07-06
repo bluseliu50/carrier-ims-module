@@ -18,10 +18,12 @@ import java.io.File
  * Persistence strategy (solves "每次启动重新执行"):
  *  - Primary: overrideConfig(subId, bundle, persistent=true). This succeeds
  *    because the app is installed under /system/priv-app/ (→ FLAG_SYSTEM) and
- *    holds MODIFY_PHONE_STATE (signature|privileged) via the privapp-permissions
- *    XML — the exact gate that ShizukuProvider.kt:168 enforces.
+ *    holds MODIFY_PHONE_STATE via the privapp-permissions XML.
  *  - Contingency: if a ROM still rejects persistent, fall back to non-persistent
- *    overrideConfig; the boot + SIM-change auto re-apply covers the gap.
+ *    overrideConfig; the boot + SIM-change receivers re-apply on every event.
+ *
+ * The module is always "enabled" — disabling the module is the root manager's
+ * job (its module toggle unmounts the overlay / removes the priv-app).
  */
 object Applier {
 
@@ -37,18 +39,12 @@ object Applier {
 
     data class ApplyOutcome(
         val lastApplyMillis: Long,
-        val enabled: Boolean,
         val slots: List<SlotResult>,
     )
 
     fun apply(context: Context, config: ConfigStore.ModuleConfig): ApplyOutcome {
         val results = mutableListOf<SlotResult>()
         val now = System.currentTimeMillis()
-
-        if (!config.enabled) {
-            writeStatus(now, enabled = false, emptyList())
-            return ApplyOutcome(now, enabled = false, slots = emptyList())
-        }
 
         val cm = context.getSystemService(CarrierConfigManager::class.java)
         val sm = context.getSystemService(SubscriptionManager::class.java)
@@ -72,8 +68,8 @@ object Applier {
                     error = "system service unavailable",
                 ),
             )
-            writeStatus(now, enabled = true, results)
-            return ApplyOutcome(now, enabled = true, slots = results)
+            writeStatus(now, results)
+            return ApplyOutcome(now, slots = results)
         }
 
         for (sub in activeSubs) {
@@ -129,8 +125,8 @@ object Applier {
             )
         }
 
-        writeStatus(now, enabled = true, results)
-        return ApplyOutcome(now, enabled = true, slots = results)
+        writeStatus(now, results)
+        return ApplyOutcome(now, slots = results)
     }
 
     /** Reflective overrideConfig: try 3-arg (subId, bundle, persistent) then 2-arg. */
@@ -156,7 +152,7 @@ object Applier {
         }
     }
 
-    private fun writeStatus(now: Long, enabled: Boolean, slots: List<SlotResult>) {
+    private fun writeStatus(now: Long, slots: List<SlotResult>) {
         try {
             val arr = JSONArray()
             for (s in slots) {
@@ -171,7 +167,6 @@ object Applier {
             }
             val status = JSONObject()
                 .put("lastApplyMillis", now)
-                .put("enabled", enabled)
                 .put("slots", arr)
             File(ConfigStore.CONFIG_DIR).mkdirs()
             File(ConfigStore.STATUS_PATH).writeText(status.toString())

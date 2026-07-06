@@ -1,56 +1,32 @@
-// Carrier IMS WebUI — vanilla JS, no bundler.
-// Uses the manager-provided global `kernelsu` API (KernelSU/APatch/MMRL all
-// expose a compatible exec). Configuration state mirrors config.json.
+// Carrier IMS WebUI — Material 3 styled, vanilla JS, no bundler.
+// Uses the KernelSU WebUI API via ES module import:
+//   import { exec, toast } from 'kernelsu'
+// (the documented form; a global is NOT exposed).
 
-// ---- toggle definitions (defaults mirror Feature.kt) ----
-const TOGGLES = [
-  { key: "volte",            label: "VoLTE",            def: true },
-  { key: "vowifi",           label: "VoWiFi",           def: true },
-  { key: "vt",               label: "视频通话 VT",       def: true },
-  { key: "vonr",             label: "VoNR",             def: true },
-  { key: "crossSim",         label: "跨 SIM 通话",       def: true },
-  { key: "ut",               label: "UT 补充业务",       def: true },
-  { key: "fiveGnr",          label: "5G NR",            def: true },
-  { key: "fiveGThresholds",  label: "5G 信号阈值",       def: true },
-  { key: "fiveGPlusIcon",    label: "5G+ 图标",          def: true },
-  { key: "show4gForLte",     label: "LTE 显示为 4G",     def: false },
+import { exec, toast } from 'kernelsu';
+
+// ---- feature definitions (defaults mirror Feature.kt) ----
+const FEATURES = [
+  { key: "volte",           label: "VoLTE",        sub: "高清通话" },
+  { key: "vowifi",          label: "VoWiFi",       sub: "Wi-Fi 通话" },
+  { key: "vt",              label: "视频通话",      sub: "ViLTE" },
+  { key: "vonr",            label: "VoNR",         sub: "5G 语音（需 Android 14+）" },
+  { key: "crossSim",        label: "跨 SIM 通话",   sub: "Cross-SIM Calling" },
+  { key: "ut",              label: "UT 补充业务",   sub: "补充服务 over UT" },
+  { key: "fiveGnr",         label: "5G NR",        sub: "启用 5G" },
+  { key: "fiveGPlusIcon",   label: "5G+ 图标",      sub: "NR Advanced 图标" },
+  { key: "fiveGThresholds", label: "5G 信号阈值",   sub: "信号强度分级" },
+  { key: "show4gForLte",    label: "LTE 显示为 4G", sub: "状态栏图标", def: false },
+  { key: "tiktokNetworkFix",label: "TikTok 修复",   sub: "自动应用 CN 国家码", def: false },
 ];
 
 const MODID = "carrier_ims";
 const MODDIR = "/data/adb/modules/" + MODID;
-const CONFIG_DEFAULT = {
-  enabled: false, applyOnBoot: true, applyOnSimChange: true, slots: {}
-};
 
-// ---- shell exec wrapper (handles Promise + callback kernelsu variants) ----
-function sh(cmd) {
-  return new Promise((resolve) => {
-    const ksu = window.kernelsu || window.ksu;
-    if (!ksu || typeof ksu.exec !== "function") {
-      resolve({ errno: -1, stdout: "", stderr: "kernelsu API not available" });
-      return;
-    }
-    try {
-      const r = ksu.exec(cmd);
-      if (r && typeof r.then === "function") {
-        r.then(resolve).catch((e) => resolve({ errno: -1, stdout: "", stderr: String(e) }));
-      } else if (typeof r === "object") {
-        resolve(r);
-      } else {
-        resolve({ errno: -1, stdout: "", stderr: "unexpected exec result" });
-      }
-    } catch (e) {
-      resolve({ errno: -1, stdout: "", stderr: String(e) });
-    }
-  });
-}
+let state = { slots: {} };
+let activeSlot = 0;
 
-function toast(msg) {
-  const ksu = window.kernelsu || window.ksu;
-  if (ksu && typeof ksu.toast === "function") { try { ksu.toast(msg); return; } catch (_) {} }
-}
-
-// ---- base64 helpers (UTF-8 safe) ----
+// ---- base64 (UTF-8 safe) ----
 function b64encode(str) {
   const bytes = new TextEncoder().encode(str);
   let bin = "";
@@ -58,155 +34,162 @@ function b64encode(str) {
   return btoa(bin);
 }
 
-// ---- state ----
-let state = JSON.parse(JSON.stringify(CONFIG_DEFAULT));
-let activeSlot = 0;
-
+// ---- config helpers ----
 function ensureSlot(slot) {
   if (!state.slots[slot]) {
     const s = {};
-    for (const t of TOGGLES) s[t.key] = t.def;
-    s.carrierName = ""; s.countryIso = ""; s.countryMccOverride = "";
+    for (const f of FEATURES) s[f.key] = f.def !== undefined ? f.def : true;
     state.slots[slot] = s;
   }
 }
 
-// ---- render toggles ----
-function renderToggles() {
-  const host = document.getElementById("toggles");
-  host.innerHTML = "";
-  ensureSlot(activeSlot);
-  const slot = state.slots[activeSlot];
-  for (const t of TOGGLES) {
-    const id = "tg-" + t.key;
-    const wrap = document.createElement("label");
-    wrap.className = "toggle";
-    wrap.innerHTML = `<input type="checkbox" id="${id}" ${slot[t.key] ? "checked" : ""}><span>${t.label}</span>`;
-    host.appendChild(wrap);
-    document.getElementById(id).addEventListener("change", (e) => {
-      slot[t.key] = e.target.checked;
-      persistLocal();
-    });
-  }
-}
-
-// ---- bind text fields for the active slot ----
-function bindSlotFields() {
-  ensureSlot(activeSlot);
-  const slot = state.slots[activeSlot];
-  const fields = ["carrierName", "countryIso", "countryMccOverride"];
-  for (const f of fields) {
-    const el = document.getElementById(f);
-    el.value = slot[f] || "";
-    el.oninput = () => { slot[f] = el.value; persistLocal(); };
-  }
-}
-
-// ---- localStorage persistence of edits (authoritative copy is config.json) ----
-function persistLocal() {
-  try { localStorage.setItem("carrierims_state", JSON.stringify(state)); } catch (_) {}
-}
 function loadLocal() {
   try {
     const s = localStorage.getItem("carrierims_state");
-    if (s) state = Object.assign(JSON.parse(JSON.stringify(CONFIG_DEFAULT)), JSON.parse(s));
+    if (s) state = Object.assign({ slots: {} }, JSON.parse(s));
   } catch (_) {}
 }
+function persistLocal() {
+  try { localStorage.setItem("carrierims_state", JSON.stringify(state)); } catch (_) {}
+}
 
-// ---- load config.json from device ----
+// ---- device config load ----
 async function loadConfig() {
-  const { stdout } = await sh(`sh ${MODDIR}/bin/read-config.sh`);
-  let cfg = null;
-  try { cfg = stdout ? JSON.parse(stdout.trim()) : null; } catch (_) {}
-  if (cfg) {
-    state.enabled = !!cfg.enabled;
-    state.applyOnBoot = cfg.applyOnBoot !== false;
-    state.applyOnSimChange = cfg.applyOnSimChange !== false;
-    state.slots = cfg.slots || {};
-  }
-  syncForm();
+  try {
+    const { stdout } = await exec(`sh ${MODDIR}/bin/read-config.sh`);
+    if (stdout) {
+      const cfg = JSON.parse(stdout.trim());
+      if (cfg && cfg.slots) state.slots = cfg.slots;
+    }
+  } catch (_) {}
+  renderAll();
 }
 
-// ---- sync UI from state ----
-function syncForm() {
-  document.getElementById("masterEnabled").checked = !!state.enabled;
-  document.getElementById("applyOnBoot").checked = !!state.applyOnBoot;
-  document.getElementById("applyOnSimChange").checked = !!state.applyOnSimChange;
-  bindSlotFields();
-  renderToggles();
+// ---- render ----
+function renderTabs() {
+  const host = document.getElementById("slotTabs");
+  host.innerHTML = "";
+  [0, 1].forEach((slot) => {
+    const b = document.createElement("button");
+    b.className = "seg" + (slot === activeSlot ? " active" : "");
+    b.innerHTML = `<span class="dot"></span>卡槽 ${slot}`;
+    b.addEventListener("click", () => {
+      collectCurrent();
+      activeSlot = slot;
+      renderTabs();
+      renderFeatures();
+    });
+    host.appendChild(b);
+  });
 }
 
-// ---- collect current UI into state ----
-function collectForm() {
-  state.enabled = document.getElementById("masterEnabled").checked;
-  state.applyOnBoot = document.getElementById("applyOnBoot").checked;
-  state.applyOnSimChange = document.getElementById("applyOnSimChange").checked;
+function renderFeatures() {
   ensureSlot(activeSlot);
   const slot = state.slots[activeSlot];
-  for (const t of TOGGLES) slot[t.key] = document.getElementById("tg-" + t.key).checked;
-  slot.carrierName = document.getElementById("carrierName").value;
-  slot.countryIso = document.getElementById("countryIso").value;
-  slot.countryMccOverride = document.getElementById("countryMccOverride").value;
+  const host = document.getElementById("featureList");
+  host.innerHTML = "";
+  for (const f of FEATURES) {
+    const li = document.createElement("li");
+    li.className = "setting-item";
+    li.innerHTML = `
+      <div class="setting-text">
+        <div class="setting-title">${f.label}</div>
+        <div class="setting-subtitle">${f.sub}</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" data-key="${f.key}" ${slot[f.key] ? "checked" : ""}>
+        <span class="track"></span><span class="thumb"></span>
+      </label>`;
+    li.querySelector("input").addEventListener("change", (e) => {
+      slot[f.key] = e.target.checked;
+      persistLocal();
+    });
+    host.appendChild(li);
+  }
+}
+
+function collectCurrent() {
+  ensureSlot(activeSlot);
+  const slot = state.slots[activeSlot];
+  document.querySelectorAll('#featureList input[type=checkbox]').forEach((el) => {
+    slot[el.dataset.key] = el.checked;
+  });
   persistLocal();
+}
+
+function renderAll() {
+  renderTabs();
+  renderFeatures();
 }
 
 // ---- actions ----
 async function applyConfig() {
-  collectForm();
-  const json = JSON.stringify(state);
-  const b64 = b64encode(json);
-  document.getElementById("applyResult").textContent = "应用中…";
-  const { stdout, stderr } = await sh(`sh ${MODDIR}/bin/apply.sh ${b64}`);
-  const ok = stdout && stdout.includes('"ok":true');
-  document.getElementById("applyResult").textContent = ok ? "✓ 已应用" : "✗ 失败";
-  toast(ok ? "已应用配置" : "应用失败");
-  setTimeout(refreshStatus, 1200);
-}
-
-async function refreshStatus() {
-  const { stdout } = await sh(`sh ${MODDIR}/bin/status.sh`);
-  let pretty = stdout || "{}";
-  try { pretty = JSON.stringify(JSON.parse(stdout.trim()), null, 2); } catch (_) {}
-  document.getElementById("statusView").textContent = pretty;
-}
-
-async function cpAction(op) {
-  const { stdout, stderr } = await sh(`sh ${MODDIR}/bin/captive-portal.sh ${op}`);
-  document.getElementById("cpView").textContent = (stdout || stderr || "").trim();
-}
-
-async function loadVersion() {
-  const { stdout } = await sh(`cat ${MODDIR}/module.prop`);
-  if (stdout) {
-    const m = stdout.match(/^version=(.+)$/m);
-    if (m) document.getElementById("version").textContent = m[1];
+  collectCurrent();
+  const b64 = b64encode(JSON.stringify(state));
+  const res = document.getElementById("applyResult");
+  res.textContent = "应用中…"; res.className = "apply-result";
+  try {
+    const { stdout } = await exec(`sh ${MODDIR}/bin/apply.sh ${b64}`);
+    const ok = stdout && stdout.includes('"ok":true');
+    res.textContent = ok ? "已应用" : "失败";
+    res.className = "apply-result " + (ok ? "ok" : "err");
+    toast(ok ? "已应用配置" : "应用失败");
+    if (ok) setTimeout(refreshStatus, 1500);
+  } catch (e) {
+    res.textContent = "失败"; res.className = "apply-result err";
+    toast("应用失败");
   }
 }
 
-// ---- wire up ----
+async function refreshStatus() {
+  let stdout = "";
+  try {
+    const r = await exec(`sh ${MODDIR}/bin/status.sh`);
+    stdout = r.stdout || "";
+  } catch (_) {}
+  const host = document.getElementById("statusView");
+  let data = null;
+  try { data = stdout ? JSON.parse(stdout.trim()) : null; } catch (_) {}
+  if (!data || !data.slots || !data.slots.length) {
+    host.innerHTML = `<div class="status-empty">暂无状态，点“应用”后刷新</div>`;
+    return;
+  }
+  host.innerHTML = "";
+  const t = new Date(data.lastApplyMillis || 0);
+  const timeStr = isNaN(t) ? "-" : t.toLocaleString();
+  const head = document.createElement("div");
+  head.className = "status-empty";
+  head.textContent = "最近应用：" + timeStr;
+  host.appendChild(head);
+  for (const s of data.slots) {
+    const row = document.createElement("div");
+    row.className = "status-row";
+    let badge = `<span class="status-badge">未应用</span>`;
+    if (s.applied) badge = `<span class="status-badge on">已应用</span>`;
+    else if (s.error) badge = `<span class="status-badge err">失败</span>`;
+    const ims = s.imsRegistered
+      ? `<span class="status-badge on">IMS 已注册</span>`
+      : `<span class="status-badge">IMS 未注册</span>`;
+    row.innerHTML = `<span>卡槽 ${s.slotIndex}</span> ${badge} ${ims}`;
+    host.appendChild(row);
+  }
+}
+
+async function loadVersion() {
+  try {
+    const { stdout } = await exec(`cat ${MODDIR}/module.prop`);
+    const m = stdout && stdout.match(/^version=(.+)$/m);
+    if (m) document.getElementById("version").textContent = m[1];
+  } catch (_) {}
+}
+
+// ---- boot ----
 document.addEventListener("DOMContentLoaded", async () => {
   loadLocal();
   await loadVersion();
   await loadConfig();
-
+  ensureSlot(activeSlot);
   document.getElementById("applyBtn").addEventListener("click", applyConfig);
   document.getElementById("refreshBtn").addEventListener("click", refreshStatus);
-  document.getElementById("cpFix").addEventListener("click", () => cpAction("fix"));
-  document.getElementById("cpRestore").addEventListener("click", () => cpAction("restore"));
-  document.getElementById("cpQuery").addEventListener("click", () => cpAction("query"));
-
-  ["masterEnabled", "applyOnBoot", "applyOnSimChange"].forEach((id) =>
-    document.getElementById(id).addEventListener("change", persistLocal));
-
-  document.querySelectorAll(".tab").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      collectForm();
-      document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      activeSlot = parseInt(btn.dataset.slot, 10);
-      bindSlotFields();
-      renderToggles();
-    }));
-
   refreshStatus();
 });

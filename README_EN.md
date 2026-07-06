@@ -22,8 +22,11 @@ app in `/system/priv-app/` that holds `MODIFY_PHONE_STATE` and calls
 - **Multi-root** — the same zip installs on KernelSU, Magisk and APatch.
 - **No Zygisk** — plain `/system` overlay + privileged app, no ZygiskNext
   dependency.
-- **WebUI console** — per-slot toggles, status, and a captive-portal CN fix.
+- **WebUI console** — Material-styled, per-slot toggles and IMS status.
 - **Updates via your root manager's built-in OTA** (`module.prop.updateJson`).
+
+> The module has no master switch — to disable it, use your root manager's
+> built-in module toggle.
 
 ## Install
 
@@ -45,13 +48,13 @@ Produces `carrier-ims-v<version>.zip`.
 ## How it works
 
 ```
-config.json (/data/adb/carrier_ims/)   ← written by WebUI via bin/apply.sh
-        │
-        ▼
+config.json (/data/adb/carrier_ims/)   <- written by WebUI via bin/apply.sh
+        |
+        v
 CarrierImsApplier (privileged app, holds MODIFY_PHONE_STATE)
-   • boot / SIM state change / WebUI broadcast → ApplierService
-   • Applier: slot → current subId → ConfigBuilder → overrideConfig(persistent=true)
-   • writes status.json (last apply time, per-slot success, IMS registered)
+   - boot / SIM state change / WebUI broadcast -> Applier directly (no FGS)
+   - Applier: slot -> current subId -> ConfigBuilder -> overrideConfig(persistent=true)
+   - writes status.json (last apply time, per-slot success, IMS registered)
 ```
 
 Persistence has a fallback: if a ROM rejects persistent writes, the module

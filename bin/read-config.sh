@@ -4,5 +4,5 @@ CONFIG_PATH=/data/adb/carrier_ims/config.json
 if [ -f "$CONFIG_PATH" ]; then
     cat "$CONFIG_PATH"
 else
-    echo '{"enabled":false,"applyOnBoot":true,"applyOnSimChange":true,"slots":{}}'
+    echo '{"slots":{}}'
 fi

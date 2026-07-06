@@ -8,6 +8,5 @@
     <privapp-permissions package="io.carrierims.applier">
         <permission name="android.permission.MODIFY_PHONE_STATE" />
         <permission name="android.permission.READ_PRIVILEGED_PHONE_STATE" />
-        <permission name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     </privapp-permissions>
 </permissions>

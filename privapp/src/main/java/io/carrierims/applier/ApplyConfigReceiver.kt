@@ -3,14 +3,17 @@ package io.carrierims.applier
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.util.Log
 
 /**
- * Triggered by the WebUI "Apply now" button via:
+ * Triggered by the WebUI "Apply" button via:
  *   am broadcast -a io.carrierims.action.APPLY_CONFIG
- * Protected by android:permission="android.permission.SHELL" so only root shell
- * / the module's own scripts can fire it.
+ * Protected by android:permission="android.permission.SHELL" so only the root
+ * shell / the module's own scripts can fire it.
+ *
+ * Runs the apply synchronously in the receiver's foreground execution window
+ * (CarrierConfig calls are sub-second). No foreground service is needed — that
+ * avoids the startForegroundService-without-startForeground crash.
  */
 class ApplyConfigReceiver : BroadcastReceiver() {
 
@@ -20,11 +23,12 @@ class ApplyConfigReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_APPLY_CONFIG) return
         Log.i(tag, "APPLY_CONFIG received")
-        val svc = Intent(context, ApplierService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(svc)
-        } else {
-            context.startService(svc)
+        val config = ConfigStore.read()
+        try {
+            val outcome = Applier.apply(context.applicationContext, config)
+            Log.i(tag, "apply done: ${outcome.slots.size} slot(s)")
+        } catch (t: Throwable) {
+            Log.e(tag, "apply failed", t)
         }
     }
 }
