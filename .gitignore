@@ -1,0 +1,21 @@
+# Gradle / Android build outputs
+privapp/build/
+privapp/.gradle/
+privapp/local.properties
+local.properties
+
+# WebUI build
+webroot-src/node_modules/
+webroot/.parcel-cache/
+
+# Release artifacts
+*.zip
+
+# Signing
+*.keystore
+*.jks
+
+# OS / IDE
+.DS_Store
+.idea/
+*.iml
