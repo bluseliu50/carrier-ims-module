@@ -1,15 +1,13 @@
 #!/system/bin/sh
-# bin/apply-root.sh — runs the CarrierConfig applier as root via app_process.
+# apply-root.sh — runs the CarrierConfig applier as root via app_process.
 #
 # Outputs exactly ONE JSON line on stdout (app.js parses it).
 # All diagnostics → /data/adb/carrier_ims/apply.log
 #
-# Usage: sh bin/apply-root.sh [apply|reset]
-MODDIR=${0%/*}
-DEX="$MODDIR/system/bin/Applier.dex"
+# Usage: sh apply-root.sh [apply|reset]
+MODROOT=/data/adb/modules/carrier_ims
+DEX="$MODROOT/system/bin/Applier.dex"
 LOG="/data/adb/carrier_ims/apply.log"
-
-mkdir -p /data/adb/carrier_ims
 
 log() { echo "[$(date '+%H:%M:%S')] $*" >> "$LOG"; }
 emit() { echo "$1"; log "RESULT: $1"; }
