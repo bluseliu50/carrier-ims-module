@@ -43,7 +43,6 @@ jobs:
             service.sh \
             uninstall.sh \
             bin/apply.sh \
-            bin/cc-apply.sh \
             bin/status.sh \
             bin/read-config.sh \
             webroot/index.html \
