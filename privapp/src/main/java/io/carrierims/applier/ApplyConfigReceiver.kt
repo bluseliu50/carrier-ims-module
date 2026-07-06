@@ -15,7 +15,7 @@ import android.util.Log
 class ApplyConfigReceiver : BroadcastReceiver() {
 
     private val tag = "ApplyConfigReceiver"
-    const val ACTION_APPLY_CONFIG = "io.carrierims.action.APPLY_CONFIG"
+    val ACTION_APPLY_CONFIG = "io.carrierims.action.APPLY_CONFIG"
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_APPLY_CONFIG) return
