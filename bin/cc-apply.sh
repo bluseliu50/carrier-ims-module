@@ -9,35 +9,38 @@ STATUS_PATH="${2:-/data/adb/carrier_ims/status.json}"
 # Suppress all stderr for the entire script.
 exec 2>/dev/null
 
-# Check if cmd phone cc is available.
+NOW=$(date +%s)000
+
 if ! command -v cmd >/dev/null 2>&1; then
-    NOW=$(date +%s)000
     echo "{\"lastApplyMillis\":$NOW,\"applied\":false,\"error\":\"cmd not found\"}" > "$STATUS_PATH"
     echo '{"ok":false,"error":"cmd not found in PATH"}'
     exit 1
 fi
 
-# Quick availability test.
-cmd phone cc set-value -p test_availability_bool false >/dev/null 2>&1
-CC_RC=$?
-if [ "$CC_RC" -ne 0 ]; then
-    NOW=$(date +%s)000
-    echo "{\"lastApplyMillis\":$NOW,\"applied\":false,\"error\":\"cmd phone cc failed (exit $CC_RC)\"}" > "$STATUS_PATH"
-    echo "{\"ok\":false,\"error\":\"cmd phone cc exit $CC_RC\"}"
+# Determine how to invoke cmd phone cc.
+# Root (uid 0) gets "Permission denied" on Pixel ROMs. Try shell uid (2000).
+CMD_PREFIX=""
+if cmd phone cc set-value -p test_availability_bool false >/dev/null 2>&1; then
+    CMD_PREFIX=""
+elif su shell cmd phone cc set-value -p test_availability_bool false >/dev/null 2>&1; then
+    CMD_PREFIX="su shell "
+else
+    echo "{\"lastApplyMillis\":$NOW,\"applied\":false,\"error\":\"cmd phone cc denied (tried root + shell)\"}" > "$STATUS_PATH"
+    echo '{"ok":false,"error":"cmd phone cc denied"}'
     exit 1
 fi
 
 set_bool() {
-    cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
+    ${CMD_PREFIX}cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
 }
 set_str() {
-    cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
+    ${CMD_PREFIX}cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
 }
 set_int() {
-    cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
+    ${CMD_PREFIX}cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
 }
 set_int_array() {
-    cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
+    ${CMD_PREFIX}cmd phone cc set-value -p "$1" "$2" >/dev/null 2>&1
 }
 
 get_bool() {
@@ -45,7 +48,6 @@ get_bool() {
 }
 
 APPLIED=0
-ERRCOUNT=0
 
 apply_slot() {
     VOLTE=$(get_bool "volte")
@@ -62,7 +64,7 @@ apply_slot() {
     SHOW4G=$(get_bool "show4gForLte")
     TIKTOK=$(get_bool "tiktokNetworkFix")
 
-    [ "$VOLTE" = "true" ] && { set_bool carrier_volte_available_bool true || ERRCOUNT=$((ERRCOUNT+1)); set_bool editable_enhanced_4g_lte_bool true; set_bool hide_enhanced_4g_lte_bool false; set_bool hide_lte_plus_data_icon_bool false; }
+    [ "$VOLTE" = "true" ] && { set_bool carrier_volte_available_bool true; set_bool editable_enhanced_4g_lte_bool true; set_bool hide_enhanced_4g_lte_bool false; set_bool hide_lte_plus_data_icon_bool false; }
     [ "$SHOW4G" = "true" ] && set_bool show_4g_for_lte_data_icon_bool true
     [ "$VT" = "true" ] && set_bool carrier_vt_available_bool true
     [ "$UT" = "true" ] && set_bool carrier_supports_ss_over_ut_bool true
@@ -90,7 +92,7 @@ apply_slot 1
 
 NOW=$(date +%s)000
 if [ "$APPLIED" -gt 0 ]; then
-    echo "{\"lastApplyMillis\":$NOW,\"applied\":true,\"slots\":[{\"slotIndex\":0,\"applied\":true,\"errors\":$ERRCOUNT}]}" > "$STATUS_PATH"
+    echo "{\"lastApplyMillis\":$NOW,\"applied\":true,\"slots\":[{\"slotIndex\":0,\"applied\":true}]}" > "$STATUS_PATH"
     echo '{"ok":true}'
 else
     echo "{\"lastApplyMillis\":$NOW,\"applied\":false,\"error\":\"no slot config\"}" > "$STATUS_PATH"
