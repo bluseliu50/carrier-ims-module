@@ -208,12 +208,12 @@ function loadVersion() {
 // Check the applier script is present.
 function checkApplier() {
   const host = document.getElementById("version");
-  const ok = sh(`ls ${MODDIR}/bin/cc-apply.sh`).trim().length > 0;
+  const ok = sh(`ls ${MODDIR}/system/bin/Applier.dex`).trim().length > 0;
   const dot = document.createElement("span");
   dot.style.cssText =
     "display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:8px;vertical-align:middle;background:" +
     (ok ? "var(--md-success)" : "var(--md-error)");
-  dot.title = ok ? "就绪" : "脚本缺失（模块未生效）";
+  dot.title = ok ? "Applier 就绪" : "Applier 缺失（模块未生效）";
   host.appendChild(dot);
 }
 
