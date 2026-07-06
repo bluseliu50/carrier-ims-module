@@ -1,18 +1,13 @@
 name: Build & Verify Module
 
-# Builds the CarrierImsApplier priv-app, packs it into the installable module
-# zip, and verifies the zip structure. The apk is only an intermediate build
-# artifact (it gets embedded inside the zip under system/priv-app/); the zip is
-# the sole published product. On version tags (v*) a GitHub Release is created,
-# which is what module.prop.updateJson + update.json point at for manager-driven
-# OTA.
-#
-# No signing keystore needed: the priv-app's privileges come from
-# privileged="true" + the privapp-permissions XML, so a debug-signed release
-# build is correct for a system-installed app.
+# Compiles Applier.java → dex (javac + d8), packs it into the installable
+# module zip, and verifies the zip structure. Pure-root mode: no priv-app,
+# no /system overlay. The zip is the sole published product. On version tags
+# (v*) a GitHub Release is created, which is what module.prop.updateJson +
+# update.json point at for manager-driven OTA.
 on:
   push:
-    branches: [master, feat/root-module]
+    branches: [master]
     tags: ['v*']
   pull_request:
     branches: [master]
@@ -29,12 +24,9 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: gradle
 
-      # ubuntu-latest ships the Android SDK + sdkmanager preinstalled at
-      # $ANDROID_HOME. Install the exact platform/build-tools AGP needs.
-      # (We call sdkmanager directly because the setup-android action mangles
-      # multi-line `packages:` into one malformed package string.)
+      # ubuntu-latest ships the Android SDK + sdkmanager preinstalled.
+      # Install the exact platform/build-tools needed for javac + d8.
       - name: Set up Android SDK
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
@@ -46,17 +38,16 @@ jobs:
             "build-tools;36.0.0" \
             "platform-tools"
 
-      # ---- Build the applier (Java -> dex). build-module.sh does javac + d8
-      #      and embeds the dex into system/bin/ inside the zip. ----
-      - name: Build module zip (compiles Applier.java → dex)
+      # ---- Build: javac + d8 compile Applier.java → system/bin/Applier.dex,
+      #      then stage + zip the runtime files. ----
+      - name: Build module zip
         run: ./build-module.sh
 
       - name: Smoke-check dex built
         run: |
           test -f system/bin/Applier.dex || { echo "!! Applier.dex not built"; exit 1; }
 
-      # ---- Verify zip structure (the module "test" — asserts every runtime
-      #      file a manager needs at install time is present) ----
+      # ---- Verify zip structure (asserts every runtime file is present) ----
       - name: Verify module zip structure
         run: |
           VERSION=$(grep -m1 '^version=' module.prop | cut -d= -f2 | tr -d ' \r')
@@ -72,9 +63,9 @@ jobs:
             service.sh \
             uninstall.sh \
             bin/apply.sh \
+            bin/apply-root.sh \
             bin/status.sh \
             bin/read-config.sh \
-            bin/apply-root.sh \
             system/bin/Applier.dex \
             webroot/index.html \
             webroot/app.js \
@@ -85,7 +76,6 @@ jobs:
           unzip -p "$ZIP" module.prop | grep -q '^versionCode=' || { echo "!! module.prop versionCode missing"; exit 1; }
           echo "✓ module zip structure verified"
 
-      # ---- Expose version + normalize zip location ----
       - name: Parse version
         id: ver
         run: |
@@ -100,9 +90,6 @@ jobs:
           path: carrier-ims-${{ steps.ver.outputs.version }}.zip
           if-no-files-found: error
 
-      # ---- Release: only on version tags (the OTA target). update.json.zipUrl
-      #      is github.com/.../releases/download/v<ver>/carrier-ims-v<ver>.zip,
-      #      so the release asset name MUST match. ----
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
