@@ -1,0 +1,113 @@
+name: Build & Verify Module
+
+# Builds the CarrierImsApplier priv-app, packs it into the installable module
+# zip, and verifies the zip structure. The apk is only an intermediate build
+# artifact (it gets embedded inside the zip under system/priv-app/); the zip is
+# the sole published product. On version tags (v*) a GitHub Release is created,
+# which is what module.prop.updateJson + update.json point at for manager-driven
+# OTA.
+#
+# No signing keystore needed: the priv-app's privileges come from
+# privileged="true" + the privapp-permissions XML, so a debug-signed release
+# build is correct for a system-installed app.
+on:
+  push:
+    branches: [master, feat/root-module]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-36
+            build-tools;36.0.0
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # ---- Build the privileged re-apply app (the main compile test).
+      #      The apk is an intermediate artifact; build-module.sh embeds it
+      #      into system/priv-app/ inside the zip. ----
+      - name: Build priv-app (assembleRelease)
+        run: ./gradlew :privapp:assembleRelease --no-daemon
+
+      - name: Smoke-check APK built
+        run: |
+          ls -la privapp/build/outputs/apk/release/
+          ls privapp/build/outputs/apk/release/*.apk >/dev/null 2>&1 || { echo "!! no APK produced — priv-app did not compile"; exit 1; }
+
+      # ---- Assemble the installable module zip (the real deliverable) ----
+      - name: Build module zip
+        run: ./build-module.sh
+
+      # ---- Verify zip structure (the module "test" — asserts every runtime
+      #      file a manager needs at install time is present) ----
+      - name: Verify module zip structure
+        run: |
+          VERSION=$(grep -m1 '^version=' module.prop | cut -d= -f2 | tr -d ' \r')
+          ZIP="../carrier-ims-${VERSION}.zip"
+          echo "Verifying $ZIP"
+          test -f "$ZIP" || { echo "!! zip not produced"; exit 1; }
+          echo "--- zip listing ---"
+          unzip -l "$ZIP"
+          for f in \
+            module.prop \
+            update.json \
+            customize.sh \
+            service.sh \
+            uninstall.sh \
+            bin/apply.sh \
+            bin/status.sh \
+            bin/read-config.sh \
+            bin/captive-portal.sh \
+            system/priv-app/CarrierImsApplier/CarrierImsApplier.apk \
+            system/etc/permissions/privapp-permissions-carrier_ims.xml \
+            webroot/index.html \
+            webroot/app.js \
+            webroot/style.css; do
+            unzip -l "$ZIP" "$f" | grep -q "$f" || { echo "!! missing in zip: $f"; exit 1; }
+          done
+          unzip -p "$ZIP" module.prop | grep -Eq '^id=[a-zA-Z][a-zA-Z0-9._-]+$' || { echo "!! module.prop id invalid"; exit 1; }
+          unzip -p "$ZIP" module.prop | grep -q '^versionCode=' || { echo "!! module.prop versionCode missing"; exit 1; }
+          echo "✓ module zip structure verified"
+
+      # ---- Expose version + normalize zip location ----
+      - name: Parse version
+        id: ver
+        run: |
+          VERSION=$(grep -m1 '^version=' module.prop | cut -d= -f2 | tr -d ' \r')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          mv "../carrier-ims-${VERSION}.zip" "carrier-ims-${VERSION}.zip"
+
+      - name: Upload module zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: carrier-ims-${{ steps.ver.outputs.version }}-module
+          path: carrier-ims-${{ steps.ver.outputs.version }}.zip
+          if-no-files-found: error
+
+      # ---- Release: only on version tags (the OTA target). update.json.zipUrl
+      #      is github.com/.../releases/download/v<ver>/carrier-ims-v<ver>.zip,
+      #      so the release asset name MUST match. ----
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: carrier-ims-${{ steps.ver.outputs.version }}.zip
