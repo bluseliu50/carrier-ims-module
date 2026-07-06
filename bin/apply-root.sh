@@ -19,13 +19,12 @@ ACTION="${1:-apply}"
 # to /data/adb/carrier_ims/status.json regardless of success/failure.
 ERRFILE="/data/adb/carrier_ims/applier_err.txt"
 mkdir -p /data/adb/carrier_ims
-CLASSPATH="$DEX" app_process / Applier "$ACTION" 2>"$ERRFILE"
+CLASSPATH="$DEX" app_process / Applier "$ACTION" >"$ERRFILE.out" 2>"$ERRFILE"
 RC=$?
 
 if [ $RC -ne 0 ]; then
-    # Read first line of stderr for the error message.
-    ERRMSG=$(head -1 "$ERRFILE" 2>/dev/null)
-    echo "{\"ok\":false,\"error\":\"app_process exit $RC: $ERRMSG\"}"
+    ERRMSG=$(cat "$ERRFILE" "$ERRFILE.out" 2>/dev/null | head -5 | tr '\n' ' ' | sed 's/"/'\''/g')
+    echo "{\"ok\":false,\"error\":\"exit $RC: $ERRMSG\"}"
 else
     echo "{\"ok\":true,\"action\":\"$ACTION\"}"
 fi
