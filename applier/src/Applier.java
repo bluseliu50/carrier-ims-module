@@ -51,7 +51,7 @@ public class Applier {
         }
         JSONObject cfg = new JSONObject(readFile(cfgFile));
         JSONObject slots = cfg.optJSONObject("slots");
-        if (slots == null || slots.isEmpty()) {
+        if (slots == null || slots.length() == 0) {
             System.out.println("{\"ok\":false,\"error\":\"no slots configured\"}");
             return;
         }
