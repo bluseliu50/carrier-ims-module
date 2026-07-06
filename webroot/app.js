@@ -1,23 +1,44 @@
 // Carrier IMS WebUI — Material 3 styled, vanilla JS, no bundler.
-// Uses the KernelSU WebUI API via ES module import:
-//   import { exec, toast } from 'kernelsu'
-// (the documented form; a global is NOT exposed).
+//
+// KernelSU manager injects the WebUI API as the global `window.ksu` (NOT a
+// `kernelsu` ES module — only SukiSU/WebUI-X inject that). The native methods
+// we use:
+//   ksu.exec(cmd)            -> synchronous, returns stdout (string)
+//   ksu.exec(cmd, callback)  -> async, calls callback(code, stdout, stderr)
+//   ksu.toast(msg)           -> native toast
+// APatch and Magisk-based managers expose a compatible `ksu`/`kernelsu` global;
+// we probe both, and fall back to a no-op so the page still renders.
 
-import { exec, toast } from 'kernelsu';
+const ksu = window.ksu || window.kernelsu;
+
+// Synchronous shell: returns stdout string (empty on failure).
+function sh(cmd) {
+  if (!ksu || typeof ksu.exec !== "function") return "";
+  try {
+    // Native ksu.exec is synchronous and returns stdout directly.
+    return ksu.exec(cmd) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function showToast(msg) {
+  try { if (ksu && typeof ksu.toast === "function") ksu.toast(msg); } catch (_) {}
+}
 
 // ---- feature definitions (defaults mirror Feature.kt) ----
 const FEATURES = [
-  { key: "volte",           label: "VoLTE",        sub: "高清通话" },
-  { key: "vowifi",          label: "VoWiFi",       sub: "Wi-Fi 通话" },
-  { key: "vt",              label: "视频通话",      sub: "ViLTE" },
-  { key: "vonr",            label: "VoNR",         sub: "5G 语音（需 Android 14+）" },
-  { key: "crossSim",        label: "跨 SIM 通话",   sub: "Cross-SIM Calling" },
-  { key: "ut",              label: "UT 补充业务",   sub: "补充服务 over UT" },
-  { key: "fiveGnr",         label: "5G NR",        sub: "启用 5G" },
-  { key: "fiveGPlusIcon",   label: "5G+ 图标",      sub: "NR Advanced 图标" },
-  { key: "fiveGThresholds", label: "5G 信号阈值",   sub: "信号强度分级" },
-  { key: "show4gForLte",    label: "LTE 显示为 4G", sub: "状态栏图标", def: false },
-  { key: "tiktokNetworkFix",label: "TikTok 修复",   sub: "自动应用 CN 国家码", def: false },
+  { key: "volte",            label: "VoLTE",        sub: "高清通话" },
+  { key: "vowifi",           label: "VoWiFi",       sub: "Wi-Fi 通话" },
+  { key: "vt",               label: "视频通话",      sub: "ViLTE" },
+  { key: "vonr",             label: "VoNR",         sub: "5G 语音（需 Android 14+）" },
+  { key: "crossSim",         label: "跨 SIM 通话",   sub: "Cross-SIM Calling" },
+  { key: "ut",               label: "UT 补充业务",   sub: "补充服务 over UT" },
+  { key: "fiveGnr",          label: "5G NR",        sub: "启用 5G" },
+  { key: "fiveGPlusIcon",    label: "5G+ 图标",      sub: "NR Advanced 图标" },
+  { key: "fiveGThresholds",  label: "5G 信号阈值",   sub: "信号强度分级" },
+  { key: "show4gForLte",     label: "LTE 显示为 4G", sub: "状态栏图标", def: false },
+  { key: "tiktokNetworkFix", label: "TikTok 修复",   sub: "自动应用 CN 国家码", def: false },
 ];
 
 const MODID = "carrier_ims";
@@ -54,14 +75,14 @@ function persistLocal() {
 }
 
 // ---- device config load ----
-async function loadConfig() {
-  try {
-    const { stdout } = await exec(`sh ${MODDIR}/bin/read-config.sh`);
-    if (stdout) {
+function loadConfig() {
+  const stdout = sh(`sh ${MODDIR}/bin/read-config.sh`);
+  if (stdout) {
+    try {
       const cfg = JSON.parse(stdout.trim());
       if (cfg && cfg.slots) state.slots = cfg.slots;
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
   renderAll();
 }
 
@@ -123,30 +144,21 @@ function renderAll() {
 }
 
 // ---- actions ----
-async function applyConfig() {
+function applyConfig() {
   collectCurrent();
   const b64 = b64encode(JSON.stringify(state));
   const res = document.getElementById("applyResult");
   res.textContent = "应用中…"; res.className = "apply-result";
-  try {
-    const { stdout } = await exec(`sh ${MODDIR}/bin/apply.sh ${b64}`);
-    const ok = stdout && stdout.includes('"ok":true');
-    res.textContent = ok ? "已应用" : "失败";
-    res.className = "apply-result " + (ok ? "ok" : "err");
-    toast(ok ? "已应用配置" : "应用失败");
-    if (ok) setTimeout(refreshStatus, 1500);
-  } catch (e) {
-    res.textContent = "失败"; res.className = "apply-result err";
-    toast("应用失败");
-  }
+  const out = sh(`sh ${MODDIR}/bin/apply.sh ${b64}`);
+  const ok = out && out.includes('"ok":true');
+  res.textContent = ok ? "已应用" : "失败";
+  res.className = "apply-result " + (ok ? "ok" : "err");
+  showToast(ok ? "已应用配置" : "应用失败");
+  if (ok) setTimeout(refreshStatus, 1200);
 }
 
-async function refreshStatus() {
-  let stdout = "";
-  try {
-    const r = await exec(`sh ${MODDIR}/bin/status.sh`);
-    stdout = r.stdout || "";
-  } catch (_) {}
+function refreshStatus() {
+  const stdout = sh(`sh ${MODDIR}/bin/status.sh`);
   const host = document.getElementById("statusView");
   let data = null;
   try { data = stdout ? JSON.parse(stdout.trim()) : null; } catch (_) {}
@@ -155,8 +167,9 @@ async function refreshStatus() {
     return;
   }
   host.innerHTML = "";
-  const t = new Date(data.lastApplyMillis || 0);
-  const timeStr = isNaN(t) ? "-" : t.toLocaleString();
+  const d = new Date(data.lastApplyMillis || 0);
+  const timeStr = isNaN(d) ? "-" :
+    `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   const head = document.createElement("div");
   head.className = "status-empty";
   head.textContent = "最近应用：" + timeStr;
@@ -175,19 +188,21 @@ async function refreshStatus() {
   }
 }
 
-async function loadVersion() {
-  try {
-    const { stdout } = await exec(`cat ${MODDIR}/module.prop`);
-    const m = stdout && stdout.match(/^version=(.+)$/m);
+function pad(n) { return n < 10 ? "0" + n : "" + n; }
+
+function loadVersion() {
+  const stdout = sh(`cat ${MODDIR}/module.prop`);
+  if (stdout) {
+    const m = stdout.match(/^version=(.+)$/m);
     if (m) document.getElementById("version").textContent = m[1];
-  } catch (_) {}
+  }
 }
 
 // ---- boot ----
-document.addEventListener("DOMContentLoaded", async () => {
+document.addEventListener("DOMContentLoaded", () => {
   loadLocal();
-  await loadVersion();
-  await loadConfig();
+  loadVersion();
+  loadConfig();
   ensureSlot(activeSlot);
   document.getElementById("applyBtn").addEventListener("click", applyConfig);
   document.getElementById("refreshBtn").addEventListener("click", refreshStatus);
