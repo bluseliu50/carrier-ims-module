@@ -19,24 +19,60 @@ runs as shell UID and persistent overrides are gated on `FLAG_SYSTEM`
 (`ShizukuProvider.kt:168`). This module fixes it with a `/system/priv-app/`
 that holds `MODIFY_PHONE_STATE` → `overrideConfig(persistent=true)`.
 
+## Documentation language
+
+- **README.md** is **Chinese** (the default shown on GitHub).
+- **README_EN.md** is the **English** version. The two link to each other.
+- Keep them in sync when you change one.
+- Do **not** mix English into `README.md` or Chinese into `README_EN.md`.
+
+## Git conventions
+
+- **Commit messages are always in English**, conventional-commits style
+  (`feat:`, `fix:`, `docs:`, `ci:`, `chore:`, `refactor:`).
+- **Single long-lived branch: `master`.** Push directly to `master`; there is
+  no `develop` or release-staging branch. Large experiments may use a
+  temporary feature branch, merged back and deleted.
+- Tag releases as `v<version>` (e.g. `v1.0.0`) on `master`.
+- Do not force-push to `master` — history is linear and fast-forward.
+
 ## Build
 
 ```sh
 ./build-module.sh          # from the repo root
 ```
 
-Prerequisites: **JDK 17+**, **Android SDK** with `platforms;android-36`
+Prerequisites: **JDK 21**, **Android SDK** with `platforms;android-36`
 (`compileSdk=36`, `minSdk=33`). Produces `../carrier-ims-v<version>.zip`
 (version read from `module.prop`).
 
 The script: `./gradlew :privapp:assembleRelease` → copies the APK into
-`system/priv-app/CarrierImsApplier/CarrierImsApplier.apk` → zips the module
-root (excluding `privapp/build`, `.gradle`, `.git`).
+`system/priv-app/CarrierImsApplier/CarrierImsApplier.apk` → stages only the
+runtime files into a temp dir → zips it (no `privapp/build`, `.gradle`,
+`.git`, `README*`, `AGENTS.md` in the install zip).
+
+## CI
+
+`.github/workflows/build.yml` runs on push to `master`, on PRs to `master`,
+on `v*` tags, and via `workflow_dispatch`. It:
+
+1. Sets up JDK 21 + Android SDK (`platforms;android-36`, `build-tools;36.0.0`)
+   by calling `sdkmanager` directly (the runner's `sdkmanager` is not on PATH;
+   use `$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager`).
+2. `./gradlew :privapp:assembleRelease`.
+3. `./build-module.sh`.
+4. Verifies the zip structure (all install-time files present, `module.prop`
+   parses, `id` matches the required regex).
+5. Uploads the module zip as an artifact.
+6. On `v*` tags only: creates a GitHub Release with
+   `carrier-ims-v<version>.zip` (the `update.json` OTA target).
 
 ## Module structure
 
 | Path | Purpose |
 |------|---------|
+| `README.md` | Chinese README (default on GitHub). |
+| `README_EN.md` | English README. |
 | `module.prop` | Module identity + `updateJson` (manager OTA). |
 | `update.json` | OTA descriptor the manager reads for updates. |
 | `customize.sh` | Multi-root installer (KernelSU/Magisk/APatch). |
@@ -49,6 +85,7 @@ root (excluding `privapp/build`, `.gradle`, `.git`).
 | `system/etc/permissions/privapp-permissions-carrier_ims.xml` | Grants `MODIFY_PHONE_STATE` etc. |
 | `privapp/` | Gradle subproject → `CarrierImsApplier.apk`. |
 | `webroot/` | Committed WebUI (`index.html`, `app.js`, `style.css`). |
+| `.github/workflows/build.yml` | CI: build + verify + (on tags) release. |
 
 ## Conventions
 
@@ -88,26 +125,43 @@ Written by `Applier` after each apply:
   BusyBox `ash` under all three roots.
 - `bin/*.sh` are invoked from the WebUI as `sh $MODDIR/bin/<name>.sh`.
 
-### Privileged app
+### Privileged app — compile against the public SDK
 
-- `overrideConfig` is a **hidden** method → reached by **reflection**
-  (`Applier.invokeOverrideConfig`): try 3-arg `(int, PersistableBundle, boolean)`
-  then 2-arg. Pass `persistent=true`; on failure fall back to `persistent=false`
+The priv-app must compile against the **public** Android SDK (no hidden-API
+stubs, no `android:privileged` manifest attr). All hidden APIs are reached by
+**reflection** or literal string constants:
+
+- `overrideConfig` is hidden → `Applier.invokeOverrideConfig` reflects the
+  3-arg `(int, PersistableBundle, boolean)` then the 2-arg form. Pass
+  `persistent=true`; on failure fall back to `persistent=false`
   (boot/SIM-change re-apply covers the gap).
-- IMS status (`createForSubscriptionId` / `isImsRegistered(int)`) is also hidden
-  → reflected (`Applier`).
-- The 13-toggle bundle is ported verbatim from the upstream `ImsModifier.buildBundle`
-  into `privapp/.../ConfigBuilder.kt`.
-- **slot → subId mapping**: at apply time enumerate
-  `SubscriptionManager.activeSubscriptionInfoList`, map each `simSlotIndex` to
-  its `subscriptionId`, then override for that subId.
+- `TelephonyManager.createForSubscriptionId` / `isImsRegistered(int)` are
+  hidden → reflected in `Applier`.
+- `Intent.ACTION_SIM_STATE_CHANGED` and
+  `TelephonyManager.ACTION_MULTI_SIM_CONFIG_CHANGED` are hidden → use the
+  literal strings `"android.intent.action.SIM_STATE_CHANGED"` and
+  `"android.telephony.action.MULTI_SIM_CONFIG_CHANGED"` in `BootReceiver` and
+  the manifest.
+- `android:privileged` is a hidden manifest attribute → **omit it**. Privileged
+  status comes from being installed in `/system/priv-app/`, not the manifest.
+- Kotlin 2.3.0 removed the `kotlinOptions` DSL → use
+  `kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_21) } }`
+  (see `privapp/build.gradle.kts`).
+- No `const val` inside a class body — use plain `val`.
+
+The 13-toggle bundle is ported verbatim from the upstream `ImsModifier.buildBundle`
+into `privapp/.../ConfigBuilder.kt`.
+
+**slot → subId mapping**: at apply time enumerate
+`SubscriptionManager.activeSubscriptionInfoList`, map each `simSlotIndex` to
+its `subscriptionId`, then override for that subId.
 
 ## Release
 
 1. Bump `module.prop` `version` + `versionCode`.
 2. Bump `update.json` `version` / `versionCode` / `zipUrl` to match.
-3. `./build-module.sh` → produces `carrier-ims-v<version>.zip`.
-4. Tag `v<version>`, attach the zip to the GitHub release.
+3. Commit on `master`, then tag `v<version>` and push the tag — CI builds and
+   creates the GitHub Release with `carrier-ims-v<version>.zip` attached.
    The manager reads `update.json` (raw URL) and offers the update.
 
 ## Don'ts
@@ -119,3 +173,5 @@ Written by `Applier` after each apply:
 - Do **not** port the TikTok `setCarrierTestOverride`, APN editor, or
   `ImsResetter` paths — they need AIDL stubs and are one-shot operations, not
   persistence. They remain in the original Shizuku app.
+- Do **not** commit Chinese commit messages, and do **not** mix languages
+  within a single README file.

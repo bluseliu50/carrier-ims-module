@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-module.sh — assemble the installable KernelSU/Magisk/APatch zip.
 #
-# Prerequisites: JDK 17+ and Android SDK with platform 36 (compileSdk=36).
+# Prerequisites: JDK 21 and Android SDK with platform 36 (compileSdk=36).
 # Run from the repo root (carrier-ims-module/).
 #
 # Produces: ../carrier-ims-v<version>.zip  (version read from module.prop)
