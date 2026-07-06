@@ -1,5 +1,0 @@
-# Marker file for magic mount / Hybrid Mount.
-#
-# /system/etc/permissions/ exists on stock but the module adds a NEW file
-# inside it. The `.replace` marker ensures the directory replacement semantics
-# are applied so the new file is visible.

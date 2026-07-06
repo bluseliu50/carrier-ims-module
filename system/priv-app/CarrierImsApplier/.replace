@@ -1,7 +1,0 @@
-# Marker file for magic mount / Hybrid Mount.
-#
-# This directory (/system/priv-app/CarrierImsApplier/) does NOT exist on the
-# stock system. Without this marker, magic mount (bind mount) skips it because
-# there is no existing target to bind over. The `.replace` marker tells the
-# mount backend to treat the entire containing directory as a replacement —
-# creating it even when it is absent from the stock partition.

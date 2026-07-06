@@ -152,33 +152,16 @@ function applyConfig() {
   const out = sh(`sh ${MODDIR}/bin/apply.sh ${b64}`);
   let info = null;
   try { info = out ? JSON.parse(out.trim()) : null; } catch (_) {}
-  const ok = !!(info && info.ok);
-  // Surface why it may not have taken effect.
-  if (!ok) {
+  if (!info || !info.ok) {
     res.textContent = "失败：" + ((info && info.error) || "未知错误");
     res.className = "apply-result err";
     showToast("应用失败");
     return;
   }
-  if (info.app !== "yes") {
-    res.textContent = "已保存配置，但特权应用未安装（未生效）";
-    res.className = "apply-result err";
-    showToast("特权应用未安装");
-    refreshStatus();
-    return;
-  }
-  // Priv-app installed + broadcast fired. Give it a moment to write
-  // status.json, then reflect the real per-slot result.
-  res.textContent = "已下发，正在确认…"; res.className = "apply-result";
-  showToast("已下发配置");
-  // Retry status a few times: the priv-app applies synchronously.
-  let tries = 0;
-  const tick = () => {
-    refreshStatus();
-    tries++;
-    if (tries < 4) setTimeout(tick, 800);
-  };
-  setTimeout(tick, 600);
+  res.textContent = "已应用"; res.className = "apply-result ok";
+  showToast("已应用配置");
+  // The applier writes status.json synchronously; refresh after a short delay.
+  setTimeout(refreshStatus, 600);
 }
 
 function refreshStatus() {
@@ -222,15 +205,15 @@ function loadVersion() {
   if (m) document.getElementById("version").textContent = m[1];
 }
 
-// Show whether the privileged app is installed (the apply path depends on it).
-function checkPrivApp() {
+// Check the applier dex is present (the apply path depends on it).
+function checkApplier() {
   const host = document.getElementById("version");
-  const installed = sh(`pm path io.carrierims.applier`).trim().length > 0;
+  const ok = sh(`ls ${MODDIR}/system/bin/Applier.dex`).trim().length > 0;
   const dot = document.createElement("span");
   dot.style.cssText =
     "display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:8px;vertical-align:middle;background:" +
-    (installed ? "var(--md-success)" : "var(--md-error)");
-  dot.title = installed ? "特权应用已安装" : "特权应用未安装（模块未生效）";
+    (ok ? "var(--md-success)" : "var(--md-error)");
+  dot.title = ok ? "Applier 就绪" : "Applier 缺失（模块未生效）";
   host.appendChild(dot);
 }
 
@@ -239,7 +222,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadLocal();
   loadVersion();
   loadConfig();
-  checkPrivApp();
+  checkApplier();
   ensureSlot(activeSlot);
   document.getElementById("applyBtn").addEventListener("click", applyConfig);
   document.getElementById("refreshBtn").addEventListener("click", refreshStatus);

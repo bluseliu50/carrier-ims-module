@@ -1,50 +1,49 @@
 #!/usr/bin/env bash
-# build-module.sh — assemble the installable KernelSU/Magisk/APatch zip.
+# build-module.sh — compile the applier to dex, then assemble the install zip.
 #
-# Prerequisites: JDK 21 and Android SDK with platform 36 (compileSdk=36).
-# Run from the repo root (carrier-ims-module/).
-#
-# Produces: ../carrier-ims-v<version>.zip  (version read from module.prop)
+# Prerequisites: JDK 21+ and Android SDK with build-tools (d8) and platform 36.
+# Run from the repo root.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 VERSION="$(grep -m1 '^version=' module.prop | cut -d= -f2 | tr -d ' \r')"
 OUT="../carrier-ims-${VERSION}.zip"
 
-echo ">> Building priv-app (CarrierImsApplier)…"
-./gradlew :privapp:assembleRelease -q
+# ---- Locate Android SDK ----
+ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+PLATFORM_JAR="$ANDROID_HOME/platforms/android-36/android.jar"
+BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME"/build-tools/*/ 2>/dev/null | tail -1)
+D8="${BUILD_TOOLS_DIR}d8"
 
-APK_IN="privapp/build/outputs/apk/release/privapp-release.apk"
-if [ ! -f "$APK_IN" ]; then
-    # Some AGP versions name it *-unsigned.apk when not signed.
-    APK_IN="privapp/build/outputs/apk/release/privapp-release-unsigned.apk"
+if [ ! -f "$PLATFORM_JAR" ]; then
+    echo "!! android.jar not found at $PLATFORM_JAR"
+    echo "   Set ANDROID_HOME to your SDK root (needs platforms;android-36)."
+    exit 1
 fi
-if [ ! -f "$APK_IN" ]; then
-    echo "!! release apk not found"; exit 1
+if [ ! -f "$D8" ]; then
+    echo "!! d8 not found in $ANDROID_HOME/build-tools/"
+    exit 1
 fi
 
-echo ">> Placing APK + permissions into system/…"
-mkdir -p system/priv-app/CarrierImsApplier
-cp -f "$APK_IN" system/priv-app/CarrierImsApplier/CarrierImsApplier.apk
+echo ">> Compiling Applier.java…"
+rm -rf build
+mkdir -p build/classes
+javac --release 11 -cp "$PLATFORM_JAR" -d build/classes applier/src/Applier.java
+
+echo ">> Compiling to dex…"
+mkdir -p system/bin
+"$D8" --min-api 33 --output system/bin build/classes/Applier.class
+echo "   -> system/bin/Applier.dex"
 
 echo ">> Packing module zip → $OUT"
 rm -f "$OUT"
-
-# Stage only the runtime files into a temp dir so the install zip carries no
-# build-time-only content (gradle, privapp source, README, AGENTS.md, etc.).
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-mkdir -p "$STAGE/system/priv-app/CarrierImsApplier" \
-         "$STAGE/system/etc/permissions" \
-         "$STAGE/bin" \
-         "$STAGE/webroot"
+mkdir -p "$STAGE/system/bin" "$STAGE/bin" "$STAGE/webroot"
 cp -f module.prop customize.sh service.sh uninstall.sh update.json "$STAGE"/
 cp -f bin/*.sh "$STAGE/bin/"
 cp -f webroot/index.html webroot/app.js webroot/style.css "$STAGE/webroot/"
-cp -f system/etc/permissions/.replace \
-   system/etc/permissions/privapp-permissions-carrier_ims.xml "$STAGE/system/etc/permissions/"
-cp -f system/priv-app/CarrierImsApplier/.replace \
-   system/priv-app/CarrierImsApplier/CarrierImsApplier.apk "$STAGE/system/priv-app/CarrierImsApplier/"
+cp -f system/bin/Applier.dex "$STAGE/system/bin/"
 
 (cd "$STAGE" && zip -qr "$OLDPWD/$OUT" .)
 

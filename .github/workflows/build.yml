@@ -46,23 +46,14 @@ jobs:
             "build-tools;36.0.0" \
             "platform-tools"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      # ---- Build the privileged re-apply app (the main compile test).
-      #      The apk is an intermediate artifact; build-module.sh embeds it
-      #      into system/priv-app/ inside the zip. ----
-      - name: Build priv-app (assembleRelease)
-        run: ./gradlew :privapp:assembleRelease --no-daemon
-
-      - name: Smoke-check APK built
-        run: |
-          ls -la privapp/build/outputs/apk/release/
-          ls privapp/build/outputs/apk/release/*.apk >/dev/null 2>&1 || { echo "!! no APK produced — priv-app did not compile"; exit 1; }
-
-      # ---- Assemble the installable module zip (the real deliverable) ----
-      - name: Build module zip
+      # ---- Build the applier (Java -> dex). build-module.sh does javac + d8
+      #      and embeds the dex into system/bin/ inside the zip. ----
+      - name: Build module zip (compiles Applier.java → dex)
         run: ./build-module.sh
+
+      - name: Smoke-check dex built
+        run: |
+          test -f system/bin/Applier.dex || { echo "!! Applier.dex not built"; exit 1; }
 
       # ---- Verify zip structure (the module "test" — asserts every runtime
       #      file a manager needs at install time is present) ----
@@ -83,8 +74,8 @@ jobs:
             bin/apply.sh \
             bin/status.sh \
             bin/read-config.sh \
-            system/priv-app/CarrierImsApplier/CarrierImsApplier.apk \
-            system/etc/permissions/privapp-permissions-carrier_ims.xml \
+            bin/apply-root.sh \
+            system/bin/Applier.dex \
             webroot/index.html \
             webroot/app.js \
             webroot/style.css; do
