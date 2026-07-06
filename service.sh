@@ -10,7 +10,7 @@ CONFIG_PATH="$CONFIG_DIR/config.json"
 mkdir -p "$CONFIG_DIR"
 
 # First-run seed: an empty config (no slot overrides). The priv-app skips
-# apply when there are no slots configured.
+# apply when there are no slots configured yet.
 if [ ! -f "$CONFIG_PATH" ]; then
     echo '{"slots":{}}' > "$CONFIG_PATH"
     chmod 644 "$CONFIG_PATH"

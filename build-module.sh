@@ -41,8 +41,10 @@ mkdir -p "$STAGE/system/priv-app/CarrierImsApplier" \
 cp -f module.prop customize.sh service.sh uninstall.sh update.json "$STAGE"/
 cp -f bin/*.sh "$STAGE/bin/"
 cp -f webroot/index.html webroot/app.js webroot/style.css "$STAGE/webroot/"
-cp -f system/etc/permissions/privapp-permissions-carrier_ims.xml "$STAGE/system/etc/permissions/"
-cp -f system/priv-app/CarrierImsApplier/CarrierImsApplier.apk "$STAGE/system/priv-app/CarrierImsApplier/"
+cp -f system/etc/permissions/.replace \
+   system/etc/permissions/privapp-permissions-carrier_ims.xml "$STAGE/system/etc/permissions/"
+cp -f system/priv-app/CarrierImsApplier/.replace \
+   system/priv-app/CarrierImsApplier/CarrierImsApplier.apk "$STAGE/system/priv-app/CarrierImsApplier/"
 
 (cd "$STAGE" && zip -qr "$OLDPWD/$OUT" .)
 

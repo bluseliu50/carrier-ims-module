@@ -33,6 +33,25 @@ if [ ! -f "$PERM" ]; then
 fi
 ui_print " Priv-app + permissions present"
 
+# --- Hybrid Mount: force overlay mode for this module ---
+# This module creates NEW directories under /system (priv-app/CarrierImsApplier/).
+# Magic mount (bind mount) cannot create new directories — only overlayfs can.
+# Hybrid Mount's default is often "magic", so we inject an explicit overlay rule.
+HM_CFG="/data/adb/hybrid-mount/config.toml"
+if [ -f "$HM_CFG" ]; then
+    ui_print " Hybrid Mount detected — injecting overlay rule"
+    # Remove any stale carrier_ims rule, then append a clean one.
+    # Use awk to drop existing [rules.carrier_ims] section (through next [).
+    awk '
+        /^\[rules\.carrier_ims\]/ { skip=1; next }
+        /^\[/ { skip=0 }
+        !skip { print }
+    ' "$HM_CFG" > "$HM_CFG.tmp" && mv "$HM_CFG.tmp" "$HM_CFG"
+    # Append our rule.
+    printf '\n[rules.carrier_ims]\ndefault_mode = "overlay"\n' >> "$HM_CFG"
+    ui_print " Hybrid Mount: carrier_ims -> overlay mode"
+fi
+
 # --- Permissions ---
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 # Ensure scripts are executable.
