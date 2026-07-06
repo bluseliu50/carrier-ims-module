@@ -10,9 +10,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 
-    <application
-        android:label="CarrierImsApplier"
-        android:privileged="true">
+    <application android:label="CarrierImsApplier">
 
         <service
             android:name=".ApplierService"
