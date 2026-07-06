@@ -82,6 +82,7 @@ public class Applier {
         // ---- Get services via ServiceManager (no Context needed) ----
         Object ccLoader = getService("carrier_config", "ICarrierConfigLoader");
         Object isub = getService("isub", "ISub");
+        Object itelephony = getService("phone", "ITelephony");
 
         if (ccLoader == null) {
             System.out.println("{\"ok\":false,\"error\":\"carrier_config service unavailable\"}");
@@ -141,11 +142,12 @@ public class Applier {
                     error = fe.getMessage() != null ? fe.getMessage() : fe.getClass().getSimpleName();
                 }
             }
-
+            boolean ims = imsRegistered(itelephony, subId);
             JSONObject r = new JSONObject();
             r.put("slotIndex", slot);
             r.put("subId", subId);
             r.put("applied", applied);
+            r.put("imsRegistered", ims);
             if (error != null) r.put("error", error);
             results.put(r);
         }
@@ -210,6 +212,31 @@ public class Applier {
                 throw e2.getCause();
             }
         }
+    }
+
+    static boolean imsRegistered(Object itelephony, int subId) {
+        if (itelephony == null) return false;
+        // isImsRegistered(int subId) — matches original ImsStatusReader.kt
+        try {
+            Method m = itelephony.getClass()
+                .getMethod("isImsRegistered", int.class);
+            Object r = m.invoke(itelephony, subId);
+            return r != null && (Boolean) r;
+        } catch (Exception ignored) { }
+        // Fallback: isImsRegisteredForSubscriber(subId)
+        try {
+            Method m = itelephony.getClass()
+                .getMethod("isImsRegisteredForSubscriber", int.class);
+            Object r = m.invoke(itelephony, subId);
+            return r != null && (Boolean) r;
+        } catch (Exception ignored) { }
+        // Fallback: no-arg
+        try {
+            Method m = itelephony.getClass().getMethod("isImsRegistered");
+            Object r = m.invoke(itelephony);
+            return r != null && (Boolean) r;
+        } catch (Exception ignored) { }
+        return false;
     }
 
     // ---- Bundle building (ported from ImsModifier.buildBundle) ----
