@@ -41,10 +41,12 @@ public class Applier {
     public static void main(String[] args) throws Throwable {
         String action = (args.length > 0) ? args[0] : "apply";
 
-        // ActivityThread is hidden API; reflect to get the application Context.
+        // app_process launched from shell has no Application. Use systemMain()
+        // to create a system-level ActivityThread and get a usable Context.
         Class<?> at = Class.forName("android.app.ActivityThread");
-        Object thread = at.getMethod("currentActivityThread").invoke(null);
-        Context ctx = (Context) at.getMethod("getApplication").invoke(thread);
+        Object thread = at.getMethod("systemMain").invoke(null);
+        Context ctx = (Context) at.getMethod("getSystemContext").invoke(thread);
+        if (ctx == null) { writeError("cannot get system context"); return; }
         CarrierConfigManager cm = (CarrierConfigManager) ctx.getSystemService(Context.CARRIER_CONFIG_SERVICE);
         SubscriptionManager sm = (SubscriptionManager) ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
         TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
