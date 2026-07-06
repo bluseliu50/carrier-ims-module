@@ -1,4 +1,3 @@
-import android.app.ActivityThread;
 import android.content.Context;
 import android.os.Bundle;
 import android.os.PersistableBundle;
@@ -42,7 +41,10 @@ public class Applier {
     public static void main(String[] args) throws Exception {
         String action = (args.length > 0) ? args[0] : "apply";
 
-        Context ctx = ActivityThread.currentActivityThread().getApplication();
+        // ActivityThread is hidden API; reflect to get the application Context.
+        Class<?> at = Class.forName("android.app.ActivityThread");
+        Object thread = at.getMethod("currentActivityThread").invoke(null);
+        Context ctx = (Context) at.getMethod("getApplication").invoke(thread);
         CarrierConfigManager cm = (CarrierConfigManager) ctx.getSystemService(Context.CARRIER_CONFIG_SERVICE);
         SubscriptionManager sm = (SubscriptionManager) ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
         TelephonyManager tm = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
