@@ -38,7 +38,7 @@ public class Applier {
     static final String K_MCC_OVERRIDE = "country_mcc_override";
     static final String MCC_CN = "460";
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Throwable {
         String action = (args.length > 0) ? args[0] : "apply";
 
         // ActivityThread is hidden API; reflect to get the application Context.
