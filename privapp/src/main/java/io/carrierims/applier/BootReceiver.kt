@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.telephony.TelephonyManager
 import android.util.Log
 
 /**
@@ -28,14 +27,14 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED -> {
                 if (config.applyOnBoot) startApply(context)
             }
-            Intent.ACTION_SIM_STATE_CHANGED -> {
+            "android.intent.action.SIM_STATE_CHANGED" -> {
                 // SIM ready/loaded → apply on SIM change if configured.
                 val ss = intent.getStringExtra("ss")
                 if (config.applyOnSimChange && (ss == "LOADED" || ss == "READY")) {
                     startApply(context)
                 }
             }
-            TelephonyManager.ACTION_MULTI_SIM_CONFIG_CHANGED -> {
+            "android.telephony.action.MULTI_SIM_CONFIG_CHANGED" -> {
                 if (config.applyOnSimChange) startApply(context)
             }
         }
