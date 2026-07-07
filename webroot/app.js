@@ -187,10 +187,13 @@ function refreshStatus() {
     let badge = `<span class="status-badge">未应用</span>`;
     if (s.applied) badge = `<span class="status-badge on">已应用</span>`;
     else if (s.error) badge = `<span class="status-badge err">失败</span>`;
+    const persist = s.persistent
+      ? `<span class="status-badge on">已持久化</span>`
+      : (s.applied ? `<span class="status-badge">未持久化</span>` : "");
     const ims = s.imsRegistered
       ? `<span class="status-badge on">IMS 已注册</span>`
       : `<span class="status-badge">IMS 未注册</span>`;
-    row.innerHTML = `<span>卡槽 ${s.slotIndex}</span> ${badge} ${ims}`;
+    row.innerHTML = `<span>卡槽 ${s.slotIndex}</span> ${badge} ${persist} ${ims}`;
     host.appendChild(row);
   }
 }

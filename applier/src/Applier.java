@@ -128,16 +128,19 @@ public class Applier {
 
             PersistableBundle bundle = buildBundle(sc);
             boolean applied = false;
+            boolean persisted = false;
             String error = null;
 
             // Try persistent first; fall back to non-persistent.
             try {
                 overrideConfig(ccLoader, subId, bundle, true);
                 applied = true;
+                persisted = true;
             } catch (Throwable pe) {
                 try {
                     overrideConfig(ccLoader, subId, bundle, false);
                     applied = true;
+                    persisted = false;
                 } catch (Throwable fe) {
                     error = fe.getMessage() != null ? fe.getMessage() : fe.getClass().getSimpleName();
                 }
@@ -147,6 +150,7 @@ public class Applier {
             r.put("slotIndex", slot);
             r.put("subId", subId);
             r.put("applied", applied);
+            r.put("persistent", persisted);
             r.put("imsRegistered", ims);
             if (error != null) r.put("error", error);
             results.put(r);
