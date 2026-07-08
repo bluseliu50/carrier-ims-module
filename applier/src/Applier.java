@@ -84,18 +84,6 @@ public class Applier {
         Object isub = getService("isub", "ISub");
         Object itelephony = getService("phone", "ITelephony");
 
-        // ---- Drop to SYSTEM uid (1000) for the overrideConfig calls ----
-        // CarrierConfigLoader's persistent override check requires caller to be
-        // system uid (1000). Root (uid 0) passes the "not shell" check but may
-        // fail the persistent check. System uid 1000 passes both.
-        // Binder getCallingUid() reflects our uid at transaction time, so
-        // setuid before making binder calls.
-        try {
-            Os.setgid(1000);
-            Os.setuid(1000);
-        } catch (Exception e) {
-            // If setuid fails, continue as root — non-persistent still works.
-        }
 
         if (ccLoader == null) {
             System.out.println("{\"ok\":false,\"error\":\"carrier_config service unavailable\"}");
@@ -141,32 +129,25 @@ public class Applier {
 
             PersistableBundle bundle = buildBundle(sc);
             boolean applied = false;
-            boolean persisted = false;
             String error = null;
-            // Try persistent first; fall back to non-persistent.
-            String persistentError = null;
+
+            // Use non-persistent override — persistent=true is gated by
+            // CarrierConfigLoader's internal checks and doesn't reliably work
+            // outside system_server. Non-persistent lives in memory; the
+            // service.sh daemon re-applies on boot and SIM change.
             try {
-                overrideConfig(ccLoader, subId, bundle, true);
+                overrideConfig(ccLoader, subId, bundle, false);
                 applied = true;
-                persisted = true;
-            } catch (Throwable pe) {
-                persistentError = pe.getMessage() != null ? pe.getMessage() : pe.getClass().getSimpleName();
-                try {
-                    overrideConfig(ccLoader, subId, bundle, false);
-                    applied = true;
-                    persisted = false;
-                } catch (Throwable fe) {
-                    error = fe.getMessage() != null ? fe.getMessage() : fe.getClass().getSimpleName();
-                }
+            } catch (Throwable fe) {
+                error = fe.getMessage() != null ? fe.getMessage() : fe.getClass().getSimpleName();
             }
+
             boolean ims = imsRegistered(itelephony, subId);
             JSONObject r = new JSONObject();
             r.put("slotIndex", slot);
             r.put("applied", applied);
-            r.put("persistent", persisted);
             r.put("imsRegistered", ims);
             if (error != null) r.put("error", error);
-            if (!persisted && persistentError != null) r.put("persistentError", persistentError);
             results.put(r);
         }
 
