@@ -1,27 +1,29 @@
 # Carrier IMS (Root)
 
 A root module for Pixel phones (works on KernelSU / Magisk / APatch) that
-persists carrier / IMS configuration (VoLTE, VoWiFi, VoNR, video calling,
-cross-SIM calling, UT, 5G NR, 5G+ icon, etc.) into the system — so it survives
-reboots, SIM removal and SIM swaps without re-applying every time.
+unlocks and configures carrier / IMS features (VoLTE, VoWiFi, VoNR, video
+calling, cross-SIM calling, UT, 5G NR, 5G+ icon, etc.). Re-applies
+automatically on boot, SIM removal and SIM swaps — no manual action needed.
 
 This repo is a fork of [`ryfineZ/carrier-ims-for-pixel`](https://github.com/ryfineZ/carrier-ims-for-pixel)
 (the Shizuku-based original app). The original had to be re-executed on every
-boot / SIM change — Shizuku runs as a shell UID and the persistent-override
-path only accepts `FLAG_SYSTEM` callers. This module's fix: ship a privileged
-app in `/system/priv-app/` that holds `MODIFY_PHONE_STATE` and calls
-`overrideConfig(persistent=true)`.
+boot / SIM change — Shizuku runs as a shell UID and the `overrideConfig`
+persistent-override path only accepts `FLAG_SYSTEM` callers. This module's
+fix: run an `app_process` program as root, acquire binder services directly
+via `ServiceManager`, call `overrideConfig`, and re-apply automatically via
+a background daemon on boot and SIM changes.
 
 [中文版本](README.md)
 
 ## What it solves
 
-- **No more re-applying on boot / SIM swap** — config is keyed by slot index
-  (stable physical position), not `subId` (which changes on every re-insert).
-  Writes are persistent, and a re-apply fires on boot and SIM change.
+- **Auto-apply on boot and SIM swap** — a background daemon waits for SIM
+  readiness after boot and applies config automatically; it continuously polls
+  SIM state and re-applies when a SIM change (removal / swap) is detected.
+- **Pure-root** — no `/system/priv-app`, no privapp-permissions, no `/system`
+  overlay. Zero boot-loop risk.
 - **Multi-root** — the same zip installs on KernelSU, Magisk and APatch.
-- **No Zygisk** — plain `/system` overlay + privileged app, no ZygiskNext
-  dependency.
+- **No Zygisk** — no ZygiskNext or any additional framework dependency.
 - **WebUI console** — Material-styled, per-slot toggles and IMS status.
 - **Updates via your root manager's built-in OTA** (`module.prop.updateJson`).
 
@@ -30,8 +32,9 @@ app in `/system/priv-app/` that holds `MODIFY_PHONE_STATE` and calls
 
 ## Install
 
-1. Download `carrier-ims-v<version>.zip` from
-   [Releases](https://github.com/bluseliu50/carrier-ims-module/releases).
+1. Download the module zip from
+   [GitHub Actions](https://github.com/bluseliu50/carrier-ims-module/actions)
+   or [Releases](https://github.com/bluseliu50/carrier-ims-module/releases).
 2. Flash it with your root manager (KernelSU / Magisk / APatch), reboot.
 3. Open the module's **WebUI**, pick toggles per slot, hit **Apply**.
 
@@ -40,26 +43,40 @@ app in `/system/priv-app/` that holds `MODIFY_PHONE_STATE` and calls
 ```sh
 git clone https://github.com/bluseliu50/carrier-ims-module.git
 cd carrier-ims-module
-./build-module.sh      # needs JDK 21 and Android SDK (platform 36)
+./build-module.sh      # needs JDK 21 and Android SDK (platform 36, build-tools)
 ```
 
 Produces `carrier-ims-v<version>.zip`.
 
+GitHub Actions CI also builds automatically on every push to `master`.
+
 ## How it works
 
 ```
-config.json (/data/adb/carrier_ims/)   <- written by WebUI via bin/apply.sh
-        |
-        v
-CarrierImsApplier (privileged app, holds MODIFY_PHONE_STATE)
-   - boot / SIM state change / WebUI broadcast -> Applier directly (no FGS)
-   - Applier: slot -> current subId -> ConfigBuilder -> overrideConfig(persistent=true)
-   - writes status.json (last apply time, per-slot success, IMS registered)
+WebUI (app.js)
+   |  base64(JSON) → bin/apply.sh → bin/apply-root.sh
+   v
+app_process / Applier  (uid 0, root)
+   |  • acquires binder services as root (carrier_config / isub / phone)
+   |  • ISub.getSubId(slot) → resolve each slot's current subId
+   |  • buildBundle() → build carrier config (ported from original ImsModifier)
+   |  • overrideConfig(subId, bundle, persistent=false)
+   |  • ITelephony.isImsRegistered(subId) → read IMS registration status
+   v
+status.json (/data/adb/carrier_ims/)
+   • last apply time, per-slot success, IMS registered
+
+service.sh (daemon)
+   • waits for SIM ready after boot → auto-apply
+   • polls SIM state every 15s → re-applies on change detected
 ```
 
-Persistence has a fallback: if a ROM rejects persistent writes, the module
-falls back to non-persistent and the boot + SIM-change auto re-apply covers
-the gap — the user-visible result is the same.
+**Why non-persistent overrides?** `overrideConfig(persistent=true)` is gated
+by `CarrierConfigLoader`'s internal checks and doesn't reliably work outside
+`system_server`. This module uses `persistent=false` (in-memory override)
+with a `service.sh` daemon that re-applies on boot and SIM changes — the
+user-visible result is identical to persistent, and matches how the original
+Shizuku app works.
 
 ## Configuration
 
